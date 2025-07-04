@@ -1,0 +1,213 @@
+File 3
+
+Load packages and reread files using the prebuilt load files function
+
+```{r, load software packages}
+rm(list = ls())
+
+#we first establish the location of the working directory where we keep everything, depending on whether it exists (i.e. which computer we are using)
+#check C drive
+#take the working directory otherwise, which should work every time
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- getwd()
+}
+
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+#we load the ar_participants just to compare dates of visits
+load_ar_files_function(previous_file_name = "file_2",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_participants"))
+
+
+a <- subset(ar_participants, grepl(x=id, pattern="2198"))
+a$manually_corrected_dob
+
+```
+
+***************************
+splitting the main participants frame into chronic patient data and then individual longitudinal data
+***************************
+
+```{r, take out the individual patient base data that is not longitudinal}
+ar_participants_base_data <- 
+  ar_participants[,c(
+  "id",
+  "Centre",
+  "Centre.Name...Centre",                                            
+  "Country...Centre",              
+  "Country.of.usual.residence...Record",
+  "Specify.the.karyotype...Details.of.Condition"      ,                   
+  "Biobank.sample.available.for.research...Details.of.Condition"  ,       
+  "Biobank.details...Details.of.Condition"   ,                            
+  "Parental.consanguinity...Family"        ,                              
+  "Family.history.of.impaired.fertility...Family",
+  "Register.ID...Record",                                          
+  "Patient.follow.up.status...Record",                               
+  "First.contact.with.centre...Record",                              
+  "Date.of.birth...Birth",
+  "Sex.at.birth...Birth",                            
+  "Country.at.birth...Birth",                          
+  "Birth.weight..g....Birth",                           
+  "Birth.length..cm....Birth",                         
+  "Gestational.Age..weeks....Birth",                        
+  "Birth.head.circumference..cm....Birth",                       
+  "Data.can.be.shared.for.research.purposes...Consent",               
+  "Current.gender...Details.of.Condition",                           
+  "Karyotype...Details.of.Condition",                          
+  "Disorder.type...Details.of.Condition",                         
+  "Actual.diagnosis...Details.of.Condition",                        
+  "Specify.the.actual.diagnosis...Details.of.Condition",                
+  "Date.of.condition.onset...Details.of.Condition",               
+  "Diagnostic.biochemistry...Details.of.Condition",              
+  "Diagnostic.biochemistry.additional.details...Details.of.Condition", 
+  "Diagnostic.genetics...Details.of.Condition",
+  "Diagnostic.genetics.additional.details...Details.of.Condition",
+  "Date.of.diagnosis...Details.of.Condition",
+  "Participation.in.Other.Registries...Details.of.Condition",
+  "Details.of.Registry.and.ID...Details.of.Condition",
+  "History.of.similar.condition...Family",
+  "Mother.s.height..cm....Family",
+  "Father.s.height..cm....Family",
+  "Date.of.death...Death",
+  "Section...Death",
+  "Cause.of.death...Death",
+  "Record...CAH.First.Presentation",
+  "Age.at.first.presentation...CAH.First.Presentation",
+  "Prenatal.diagnosis...CAH.First.Presentation",
+  "Prenatal.dexamethasone.therapy...CAH.First.Presentation",
+  "Additional.details...CAH.First.Presentation",
+  "Prader.stage.at.first.presentation...CAH.First.Presentation",
+  "Salt.wasting.crisis.at.presentation...CAH.First.Presentation",
+  "Adrenal.crisis.at.first.presentation...CAH.First.Presentation",
+  "spurious_original_dob_code", 
+  "spurious_manually_corrected_dob_code", 
+  "sex_1_for_M_2_for_F",
+  "age_at_first_known_over_3_months",
+  "manually_corrected_dob"
+)]
+```
+
+Now we have pulled out the base data, we can drop it all from the ar_participants frame. Then we can join it all back in when we incorporate the meds and labs data, to ensure the base data is in every row
+
+Same columns to remove, just without id
+
+```{r, define which columns to drop from longitudinal data}
+drop <-   
+  c("Centre.Name...Centre", 
+  "Centre",  
+  "Country...Centre",        
+  "Country.of.usual.residence...Record",
+  "Transferred.note...Record",
+  "Can.be.contacted.for.research.purposes...Consent",
+  "Specify.the.karyotype...Details.of.Condition"      ,                   
+  "Biobank.sample.available.for.research...Details.of.Condition"  ,       
+  "Biobank.details...Details.of.Condition"   ,                            
+  "Parental.consanguinity...Family"        ,                              
+  "Family.history.of.impaired.fertility...Family",
+  "Register.ID...Record",                                          
+  "Patient.follow.up.status...Record",                               
+  "First.contact.with.centre...Record",                              
+  "Date.of.birth...Birth",      
+  "manually_corrected_dob",                            
+  "Sex.at.birth...Birth",                            
+  "Country.at.birth...Birth",                          
+  "Birth.weight..g....Birth",                           
+  "Birth.length..cm....Birth",                         
+  "Gestational.Age..weeks....Birth",                        
+  "Birth.head.circumference..cm....Birth",                       
+  "Data.can.be.shared.for.research.purposes...Consent",               
+  "Current.gender...Details.of.Condition",                           
+  "Karyotype...Details.of.Condition",                          
+  "Disorder.type...Details.of.Condition",                         
+  "Actual.diagnosis...Details.of.Condition",                        
+  "Specify.the.actual.diagnosis...Details.of.Condition",                
+  "Date.of.condition.onset...Details.of.Condition",               
+  "Diagnostic.biochemistry...Details.of.Condition",              
+  "Diagnostic.biochemistry.additional.details...Details.of.Condition",
+  "Diagnostic.genetics...Details.of.Condition",
+  "Diagnostic.genetics.additional.details...Details.of.Condition",
+  "Date.of.diagnosis...Details.of.Condition",
+  "Participation.in.Other.Registries...Details.of.Condition",
+  "Details.of.Registry.and.ID...Details.of.Condition",
+  "History.of.similar.condition...Family",
+  "Mother.s.height..cm....Family",
+  "Father.s.height..cm....Family",
+  "Date.of.death...Death",
+  "Section...Death",
+  "Cause.of.death...Death",
+  "Record...CAH.First.Presentation",
+  "Age.at.first.presentation...CAH.First.Presentation",
+  "Prenatal.diagnosis...CAH.First.Presentation",
+  "Prenatal.dexamethasone.therapy...CAH.First.Presentation",
+  "Additional.details...CAH.First.Presentation",
+  "Prader.stage.at.first.presentation...CAH.First.Presentation",
+  "Salt.wasting.crisis.at.presentation...CAH.First.Presentation",
+  "Adrenal.crisis.at.first.presentation...CAH.First.Presentation",
+  "spurious_original_dob_code",
+  "spurious_manually_corrected_dob_code",
+  "sex_1_for_M_2_for_F",
+  "age_at_first_known_over_3_months" )
+
+ar_participants_longitudinal_data <- 
+  ar_participants[,!(names(ar_participants) %in% drop)]
+
+ncol(ar_participants)
+
+print("we should now have one more column in both frames, because id is kept in both")
+
+ncol(ar_participants_longitudinal_data) + 
+  ncol(ar_participants_base_data)
+
+#however, we don't want duplications for the base data so make it unique
+ar_participants_base_data <- 
+  unique(ar_participants_base_data)
+
+#check frequency to show that there is one line per patient only
+subset_frame <- 
+  subset(as.data.frame(freq(ar_participants_base_data$id)), Freq>1)
+
+print("This number should be zero:")
+
+nrow(subset_frame ) - 1
+```
+
+```{r, give the base_data visits a binary code, so when joined we can see when the data wasn't present in each sub frame}
+ar_participants_longitudinal_data$visit_in_longitudinal_data <- 
+  1
+  
+ar_participants_base_data$visit_in_base_data <- 
+  1
+```
+
+```{r, tell us the column names in the longitudinal data}
+sink("column_names_ar_longitudinal_data.txt")
+colnames(ar_participants_longitudinal_data)
+sink()
+colnames(ar_participants_longitudinal_data)
+colnames(ar_participants_base_data)
+```
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+#remove the combined frame because we just want to save the two separate frames
+rm(ar_participants)
+save_ar_files_function(
+  parent_directory = location_of_data_files,
+  parent_file_name = "file_3")
+Sys.time()
+```

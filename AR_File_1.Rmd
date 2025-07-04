@@ -1,0 +1,472 @@
+I-CAH Adiposity Rebound Analysis
+
+This file should be within your main directory of analysis. Within that directory should be a "ar_functions_folder" to store functions, and "ar_data_files_to_load" where files are saved and loaded. 
+
+```{r, load software packages}
+rm(list = ls())
+
+#we first establish the location of the working directory where we keep everything, depending on whether it exists (i.e. which computer we are using)
+#check C drive
+#take the working directory otherwise, which should work every time
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- getwd()
+}
+
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+```
+
+```{r, read in files and write column names for reference}
+ar_participants <- ar_participants_original <- 
+  read.csv("./2024-01-26_Data_extraction_adiposity_rebound/STUDY DATASET 202305_NL CAH adiposity (CAH) cah module_corrected.csv", header=T, na.strings="")
+
+write.csv(ar_participants_original, "ar_participants_original.csv")
+```
+
+```{r, create column names and missing data percentage files to refer to}
+column_names_and_missing_percentages_ar_participants <-
+  data.frame(
+    Column=colnames(ar_participants),
+    Percentage_complete=NA
+  )
+
+#create a loop to report the percentage complete
+for (i in 1:length(column_names_and_missing_percentages_ar_participants$Column)){
+  each_column <- column_names_and_missing_percentages_ar_participants[i,1]
+
+  column_names_and_missing_percentages_ar_participants[i,"Percentage_complete"] <- 
+    round(100*
+      sum(!is.na(ar_participants[,c(each_column)])) / 
+      length(ar_participants[,c(each_column)]), digits=1)
+}
+
+dir.create("Column_Names_and_missing_percentages")
+write.csv(column_names_and_missing_percentages_ar_participants, 
+          "./Column_Names_and_missing_percentages/colnames_and_missing_percentage_ar_participants.csv", 
+          row.names=F)
+```
+
+########################################
+Type of CAH
+########################################
+
+the non classic CAH response can go into another column that we call 'type_of_cah'. This can be created from 'Specify.the.actual.diagnosis...Details.of.Condition' which contains some information about salt wasters, but realistically is very poorly completed
+
+```{r, creation of type_of_cah column}
+ar_participants$type_of_cah <- 
+  ar_participants$Specify.the.actual.diagnosis...Details.of.Condition
+
+#now we just correct for different spellings with grepl
+ar_participants$type_of_cah <-
+  ifelse(grepl(x=ar_participants$type_of_cah,
+               pattern="Satwasting" , ignore.case = TRUE),
+         "Salt_wasting",
+         ar_participants$type_of_cah)
+ar_participants$type_of_cah <-
+  ifelse(grepl(x=ar_participants$type_of_cah,
+               pattern="salt" , ignore.case = TRUE),
+         "Salt_wasting",
+         ar_participants$type_of_cah)
+ar_participants$type_of_cah <-
+  ifelse(grepl(x=ar_participants$type_of_cah,
+               pattern="virilising" , ignore.case = TRUE),
+         "Simple_virilising",
+         ar_participants$type_of_cah)
+ar_participants$type_of_cah <-
+  ifelse(grepl(x=ar_participants$type_of_cah,
+               pattern="late" , ignore.case = TRUE),
+         "Non_classic",
+         ar_participants$type_of_cah)
+ar_participants$type_of_cah <-
+  ifelse(grepl(x=ar_participants$type_of_cah,
+               pattern="non-classic" , ignore.case = TRUE),
+         "Non_classic",
+         ar_participants$type_of_cah)
+
+
+```
+
+********************************************
+creation of decimal age column for adiposity rebound data
+********************************************
+
+```{r, calculate a preliminary decimal age}
+ar_participants$file_1_dob_posix <-
+  as.POSIXct(ar_participants$Date.of.birth...Birth, format = "%d/%m/%Y")
+ar_participants$file_1_visit_date_posix <-
+  as.POSIXct(ar_participants$Date...CAH.Longitudinal.Data, format = "%d/%m/%Y")
+
+ar_participants$Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV.. <- 
+  as.numeric(difftime(
+    ar_participants$file_1_visit_date_posix,
+    ar_participants$file_1_dob_posix,
+    units = "days"
+  )) / 362.5
+```
+
+
+Centres may be approached to manually correct outlying entries flagged as biologically or chronologically implausible
+
+Original columns are retained 
+
+```{r, creation of manually corrected columns for date, dob, height and weight and retention of original columns}
+ar_participants$manually_corrected_longitudinal_date <- 
+  ar_participants$Date...CAH.Longitudinal.Data
+
+ar_participants$manually_corrected_dob <- 
+  ar_participants$Date.of.birth...Birth
+
+ar_participants$manually_corrected_height <- 
+  as.numeric(ar_participants$Height..cm....CAH.Longitudinal.Data)
+
+print("if the following number is negative you need to look down the height_numeric_conversion_check")
+
+length(unique(ar_participants$Height..cm....CAH.Longitudinal.Data)) -
+  length(unique(ar_participants$manually_corrected_height))
+
+height_numeric_conversion_check <-
+  subset(ar_participants[,c(
+    "Register.ID...Record",
+    "Height..cm....CAH.Longitudinal.Data",
+    "manually_corrected_height")],
+         !is.na(Height..cm....CAH.Longitudinal.Data) & 
+           is.na(manually_corrected_height) |
+         is.na(Height..cm....CAH.Longitudinal.Data) & 
+           !is.na(manually_corrected_height) )
+
+height_mistake <-
+  subset(
+    ar_participants, Register.ID...Record %in% height_numeric_conversion_check$Register.ID...Record
+  )
+
+ar_participants$manually_corrected_weight <- 
+  as.numeric(ar_participants$Weight..kg....CAH.Longitudinal.Data)
+
+print("if the following number is negative you need to look down the weight_numeric_conversion_check")
+
+length(unique(ar_participants$Weight..kg....CAH.Longitudinal.Data)) -
+  length(unique(ar_participants$manually_corrected_weight))
+
+weight_numeric_conversion_check <-
+  subset(ar_participants[,c(
+    "Register.ID...Record",
+    "Weight..kg....CAH.Longitudinal.Data",
+    "manually_corrected_weight")],
+         !is.na(Weight..kg....CAH.Longitudinal.Data) & 
+           is.na(manually_corrected_weight) |
+         is.na(Weight..kg....CAH.Longitudinal.Data) & 
+           !is.na(manually_corrected_weight) )
+
+weight_mistake <-
+  subset(
+    ar_participants, Register.ID...Record %in% weight_numeric_conversion_check$Register.ID...Record
+  )
+
+ar_participants$Date...CAH.Longitudinal.Data_original <- 
+  ar_participants$Date...CAH.Longitudinal.Data
+
+ar_participants$Date.of.birth...Birth_original <- 
+  ar_participants$Date.of.birth...Birth
+
+ar_participants$Height..cm....CAH.Longitudinal.Data_original <- 
+  ar_participants$Height..cm....CAH.Longitudinal.Data
+
+ar_participants$Weight..kg....CAH.Longitudinal.Data_original <- 
+  ar_participants$Weight..kg....CAH.Longitudinal.Data
+
+ar_participants$BMI...CAH.Longitudinal.Data_original <- 
+  ar_participants$BMI...CAH.Longitudinal.Data
+```
+
+```{r, assessment of BMI in context of no data entry for height or weight}
+#in order to learn anything from the data field BMI, we would need BMI without weight or BMI without height
+ar_participants$bmi_without_weight <-
+  ifelse(!is.na(ar_participants$BMI...CAH.Longitudinal.Data) &
+           is.na(ar_participants$Weight..kg....CAH.Longitudinal.Data),
+         1,
+         0)
+print("number of bmi without weight:")
+sum(ar_participants$bmi_without_weight)
+
+ar_participants$bmi_without_height <-
+  ifelse(!is.na(ar_participants$BMI...CAH.Longitudinal.Data) &
+           is.na(ar_participants$Height..cm....CAH.Longitudinal.Data),
+         1,
+         0)
+print("number of bmi without height:")
+sum(ar_participants$bmi_without_height)
+
+ar_participants_learn_from_bmi <-
+  subset(ar_participants, 
+         bmi_without_weight==1 | 
+         bmi_without_height==1)
+
+ar_participants_learn_from_bmi <-
+  subset(ar_participants_learn_from_bmi, 
+         Register.ID...Record %in% ar_participants_learn_from_bmi$Register.ID...Record)
+
+ar_participants_learn_from_bmi <- 
+  ar_participants_learn_from_bmi[,c(
+  "Register.ID...Record",
+  "Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV..",
+  "manually_corrected_height",
+  "Height..cm....CAH.Longitudinal.Data_original",
+  "manually_corrected_weight",
+  "Weight..kg....CAH.Longitudinal.Data_original",
+  "BMI...CAH.Longitudinal.Data",
+  "bmi_without_height",
+  "bmi_without_weight"
+)]
+```
+
+```{r, back calculate height or weight from BMI if the former is missing}
+#if we have BMI and weight but we don't have height, then back calculate height
+ar_participants$manually_corrected_height <-
+  ifelse(!is.na(ar_participants$BMI...CAH.Longitudinal.Data) &
+          !is.na(ar_participants$Weight..kg....CAH.Longitudinal.Data) &
+          is.na(ar_participants$Height..cm....CAH.Longitudinal.Data),
+         100*(ar_participants$Weight..kg....CAH.Longitudinal.Data /
+          ar_participants$BMI...CAH.Longitudinal.Data)^0.5,
+  ar_participants$manually_corrected_height)
+
+#if we have BMI and height but we don't have weight, then back calculate weight
+ar_participants$manually_corrected_weight <-
+  ifelse(!is.na(ar_participants$BMI...CAH.Longitudinal.Data) &
+          !is.na(ar_participants$Height..cm....CAH.Longitudinal.Data) &
+          is.na(ar_participants$Weight..kg....CAH.Longitudinal.Data),
+         ar_participants$BMI...CAH.Longitudinal.Data *
+          ((as.numeric(ar_participants$Height..cm....CAH.Longitudinal.Data)/100)^2),
+  ar_participants$manually_corrected_weight)
+
+#tell me how many we back calculated height for
+ar_participants$back_calculated_height <-
+  ifelse(!is.na(ar_participants$BMI...CAH.Longitudinal.Data) &
+          !is.na(ar_participants$Weight..kg....CAH.Longitudinal.Data) &
+          is.na(ar_participants$Height..cm....CAH.Longitudinal.Data),
+         1,
+  0)
+
+sum(ar_participants$back_calculated_height)
+
+#tell me how many we back calculated weight for
+ar_participants$back_calculated_weight <-
+  ifelse(!is.na(ar_participants$BMI...CAH.Longitudinal.Data) &
+          !is.na(ar_participants$Height..cm....CAH.Longitudinal.Data) &
+          is.na(ar_participants$Weight..kg....CAH.Longitudinal.Data),
+         1,
+  0)
+
+sum(ar_participants$back_calculated_weight)
+
+view_back_calculated_weight <- 
+  subset(ar_participants, back_calculated_weight==1)[,c(
+  "Register.ID...Record",
+  "Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV..",
+  "manually_corrected_height",
+  "Height..cm....CAH.Longitudinal.Data_original",
+  "manually_corrected_weight",
+  "Weight..kg....CAH.Longitudinal.Data_original",
+  "BMI...CAH.Longitudinal.Data"
+)]
+
+view_back_calculated_height <- 
+  subset(ar_participants, back_calculated_height==1)[,c(
+  "Register.ID...Record",
+  "Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV..",
+  "manually_corrected_height",
+  "Height..cm....CAH.Longitudinal.Data_original",
+  "manually_corrected_weight",
+  "Weight..kg....CAH.Longitudinal.Data_original",
+  "BMI...CAH.Longitudinal.Data"
+)]
+```
+
+
+```{r, check back calculated weights}
+ggplot(data=subset(ar_participants, back_calculated_weight==1)) +
+  geom_point(aes(x=Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV..,
+                 y=manually_corrected_weight)) +
+               labs(title="check these back calculated weights make sense for age:")
+```
+
+
+```{r, check back calculated heights}
+ggplot(data=subset(ar_participants, back_calculated_height==1)) +
+  geom_point(aes(x=Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV..,
+                 y=manually_corrected_height)) +
+               labs(title="check these back calculated heights make sense for age:")
+```
+
+
+
+###################################
+assessment of hypertension and antihypertensives columns
+###################################
+
+to flag people on antihypertensives, these columns were reviewed manually to ensure consistency and anyone who has any hint of treatment or diagnosis to be flagged
+
+```{r, creation of manuallycorrected columns related to hypertension}
+ar_participants$manually_corrected_hypertension_diagnosis_yes_no <-
+  ar_participants$Hypertension...Comorbid.Conditions.and.Surgery
+
+ar_participants$manually_corrected_hypertension_note <-
+  ar_participants$Hypertension.note...Comorbid.Conditions.and.Surgery
+
+ar_participants$manually_corrected_antihypertensives_yes_no <-
+  ar_participants$Antihypertensives...Current.Medication
+
+ar_participants$manually_corrected_antihypertensives_note <-
+  ar_participants$Antihypertensives.note...Current.Medication
+```
+
+
+####################################
+Manual data correction report for this file
+####################################
+
+```{r, %% number of values changed for Specify.the.actual.diagnosis...Details.of.Condition to type_of_cah }
+ar_participants$type_of_cah_changed <-
+  ifelse(ar_participants$Specify.the.actual.diagnosis...Details.of.Condition != 
+           ar_participants$type_of_cah,
+         1,
+         0)
+sum(ar_participants$type_of_cah_changed, na.rm=T)
+sum((ar_participants$type_of_cah_changed==0), na.rm=T)
+```
+
+```{r, %% number of values changed for manually_corrected_longitudinal_date}
+ar_participants$manually_corrected_longitudinal_date_changed <-
+  ifelse(ar_participants$manually_corrected_longitudinal_date !=
+           ar_participants$Date...CAH.Longitudinal.Data |
+         is.na(ar_participants$manually_corrected_longitudinal_date) &
+           !is.na(ar_participants$Date...CAH.Longitudinal.Data) |
+         !is.na(ar_participants$manually_corrected_longitudinal_date) &
+           is.na(ar_participants$Date...CAH.Longitudinal.Data)
+           ,
+         1,
+         0)
+
+print("Number manually_corrected_longitudinal_date_changed")
+sum(ar_participants$manually_corrected_longitudinal_date_changed, na.rm=T)
+
+print("Number manually_corrected_longitudinal_date_ NOT changed")
+sum((ar_participants$manually_corrected_longitudinal_date_changed==0), na.rm=T)
+
+print("Number without longitudinal date")
+sum(is.na(ar_participants$Date...CAH.Longitudinal.Data))
+
+sum(!is.na(ar_participants$Date...CAH.Longitudinal.Data))
+
+sum(ar_participants$manually_corrected_longitudinal_date_changed, na.rm=T) + 
+  sum((ar_participants$manually_corrected_longitudinal_date_changed==0), na.rm=T) -
+  nrow(ar_participants)
+
+nrow(ar_participants)
+
+```
+
+```{r, %% Create ar_participants_with_longitudinal_date}
+print("Create ar_participants_with_longitudinal_date for assessment of other columns")
+
+ar_participants_with_longitudinal_date <- 
+  subset(ar_participants, !is.na(Date...CAH.Longitudinal.Data))
+
+nrow(ar_participants_with_longitudinal_date)
+```
+
+```{r, %% number of values changed for manually_corrected_dob}
+ar_participants_with_longitudinal_date$manually_corrected_dob_changed <-
+  ifelse(  
+    ar_participants_with_longitudinal_date$manually_corrected_dob !=
+    ar_participants_with_longitudinal_date$Date.of.birth...Birth ,
+         1,
+         0)
+
+ar_participants_with_longitudinal_date_single_id <-
+  unique(ar_participants_with_longitudinal_date[,c("Register.ID...Record",
+                     "manually_corrected_dob_changed")])
+
+print("Number of patients with dob manually corrected")
+sum(ar_participants_with_longitudinal_date_single_id$manually_corrected_dob_changed, na.rm=T)
+
+print("Number of patients with dob not manually corrected")
+sum((ar_participants_with_longitudinal_date_single_id$manually_corrected_dob_changed==0), na.rm=T)
+
+print("Total number of patients in the extraction:")
+nrow(ar_participants_with_longitudinal_date_single_id)
+
+print("Number of patients not counted - this should be zero")
+sum(ar_participants_with_longitudinal_date_single_id$manually_corrected_dob_changed, na.rm=T) + 
+  sum((ar_participants_with_longitudinal_date_single_id$manually_corrected_dob_changed==0), na.rm=T) -
+  nrow(ar_participants_with_longitudinal_date_single_id)
+```
+
+```{r, %% number of values changed for height}
+ar_participants_with_longitudinal_date$manually_corrected_height_changed <-
+  ifelse(ar_participants_with_longitudinal_date$manually_corrected_height !=
+  ar_participants_with_longitudinal_date$Height..cm....CAH.Longitudinal.Data |
+         is.na(ar_participants_with_longitudinal_date$manually_corrected_height) &
+           !is.na(ar_participants_with_longitudinal_date$Height..cm....CAH.Longitudinal.Data) |
+         !is.na(ar_participants_with_longitudinal_date$manually_corrected_height) &
+           is.na(ar_participants_with_longitudinal_date$Height..cm....CAH.Longitudinal.Data),
+         1,
+         0)
+
+print("Number of visits with manually corrected height")
+sum(ar_participants_with_longitudinal_date$manually_corrected_height_changed, na.rm=T)
+
+print("Number of visits with missing height")
+sum(is.na(ar_participants_with_longitudinal_date$Height..cm....CAH.Longitudinal.Data), na.rm=T)
+
+print("Number of visits with height")
+sum(!is.na(ar_participants_with_longitudinal_date$manually_corrected_height_changed), na.rm=T)
+
+print("Total number of visits with longitudinal date")
+nrow(ar_participants_with_longitudinal_date)
+```
+
+```{r, %% number of values changed for weight}
+ar_participants_with_longitudinal_date$manually_corrected_weight_changed <-
+  ifelse(ar_participants_with_longitudinal_date$manually_corrected_weight !=
+  ar_participants_with_longitudinal_date$Weight..kg....CAH.Longitudinal.Data |
+         is.na(ar_participants_with_longitudinal_date$manually_corrected_weight) &
+           !is.na(ar_participants_with_longitudinal_date$Weight..kg....CAH.Longitudinal.Data) |
+         !is.na(ar_participants_with_longitudinal_date$manually_corrected_weight) &
+           is.na(ar_participants_with_longitudinal_date$Weight..kg....CAH.Longitudinal.Data),
+         1,
+         0)
+
+print("Number of visits with manually corrected weight")
+sum(ar_participants_with_longitudinal_date$manually_corrected_weight_changed, na.rm=T)
+
+print("Number of visits with missing weight")
+sum(is.na(ar_participants_with_longitudinal_date$Weight..kg....CAH.Longitudinal.Data), na.rm=T)
+
+print("Number of visits with weight")
+sum(!is.na(ar_participants_with_longitudinal_date$manually_corrected_weight_changed), na.rm=T)
+
+print("Total number of visits with longitudinal date")
+nrow(ar_participants_with_longitudinal_date)
+```
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory = location_of_data_files,
+  parent_file_name = "file_1")
+
+Sys.time()
+```

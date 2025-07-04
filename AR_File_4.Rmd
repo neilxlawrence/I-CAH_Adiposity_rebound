@@ -1,0 +1,1671 @@
+Load packages and reread files using the prebuilt load files function
+
+```{r, load software packages}
+rm(list = ls())
+
+#we first establish the location of the working directory where we keep everything, depending on whether it exists (i.e. which computer we are using)
+#check C drive
+#take the working directory otherwise, which should work every time
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- getwd()
+}
+
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+#we load the ar_participants just to compare dates of visits
+load_ar_files_function(previous_file_name = "file_3",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_participants_longitudinal_data"))
+```
+
+
+```{r, establish dates within longitudinal data to create a vector through which to check}
+ar_participants_longitudinal_visit_dates <-
+  ar_participants_longitudinal_data[,c(
+    "id",
+    "visit_date")]
+
+#rename that to tell us what frame it is coming from
+names(ar_participants_longitudinal_visit_dates)[names(
+  ar_participants_longitudinal_visit_dates)=="visit_date"] <- 
+  "longitudinal_visit_date"
+
+#we don't want to join those, we want to paste them together. then we can simply list the pasted id and longitudinal visit date, and get the other frame to check if the pasted id labs visit date is in that list
+longitudinal_id_visit_dates_vector_to_check <-
+  as.vector(paste0(ar_participants_longitudinal_visit_dates$id,
+                   "_",
+                   ar_participants_longitudinal_visit_dates$longitudinal_visit_date))
+
+#put that into a frame purely for purposes of looking inside the console
+longitudinal_id_visit_dates_vector_to_check_frame <- 
+  as.data.frame(longitudinal_id_visit_dates_vector_to_check)
+```
+
+```{r, load labs data and pull out original versions of columns}
+print("the ar_labs frame is extracted separately from the registry, and may have slightly different patients than in the longitudinal extraction - e.g. data from those with a different diagnosis as that that is in the ar_participants frame, and will need to be removed later if they don't have corresponding ar_participants data")
+
+ar_labs <- 
+  ar_labs_original <-
+  read.csv("./2024-01-26_Data_extraction_adiposity_rebound/STUDY Labs 25.1.24.csv", 
+           header=T, 
+           na.strings="NULL")
+
+#order the original frame and reprint it back into the working directory just for easy manual review
+ar_labs_original_ordered <- 
+  ar_labs_original[order(ar_labs_original$record_id,
+         ar_labs_original$assessment_id),] 
+write.csv(ar_labs_original_ordered, "ar_labs_original_ordered.csv", row.names=F)
+
+print("number of rows in the lab results frame")
+
+write.csv(ar_labs$assessment_date , "visitcheck001.csv")
+nrow(ar_labs)
+```
+
+
+```{r, check assessment_date is entered in the same format throughout}
+ar_labs$unexpected_assessment_date_format <-
+  ifelse(grepl("\\d{2}/\\d{2}/\\d{4}", ar_labs$assessment_date),
+         0,
+         1)
+
+print("This number shows the number of assessment_date that are in an unexpected format and will need adjustment below")
+
+sum(ar_labs$unexpected_date_format)
+
+print("If that last number isn't zero, you have to ensure that there is manual correction of columns that have been entered in a different format")
+
+```
+
+```{r, check labs_date_time is entered in the same format throughout}
+#this checks for a format that has had posixct run through it
+ar_labs$expected_data_and_time_format <-
+  ifelse(grepl("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$", ar_labs$date_and_time),
+         1,
+         0)
+
+print("This number shows the number of data_and_time that are in an expected format and will therefore not need adjustment below")
+
+sum(ar_labs$expected_data_and_time_format) 
+
+print("Number of date_and_time that is NA")
+
+sum(is.na(ar_labs$date_and_time))
+
+ar_labs$unexpected_data_and_time_format <-
+  ifelse(grepl("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$", ar_labs$date_and_time) |
+           is.na(ar_labs$date_and_time) |
+           ar_labs$date_and_time==" "|
+           ar_labs$date_and_time=="",
+         0,
+         1)
+
+print("This number shows the number of data_and_time that are in an unexpected format and will need adjustment below")
+
+sum(ar_labs$unexpected_data_and_time_format) #- sum(ar_labs$expected_data_and_time_format) 
+
+print("If that last number isn't zero, you have to ensure that there is manual correction of columns that have been entered in a different format")
+
+date_format_check <- 
+  ar_labs[,c(
+    "unexpected_data_and_time_format",
+    "expected_data_and_time_format",
+    "date_and_time"
+  )]
+```
+
+```{r, create column names and missing data percentage files to refer to}
+column_names_and_missing_percentages_ar_labs_original <-
+  data.frame(
+    Column=colnames(ar_labs_original),
+    Percentage_complete=NA
+  )
+
+#create a loop to report the percentage complete
+for (i in 1:length(column_names_and_missing_percentages_ar_labs_original$Column)){
+  each_column <- column_names_and_missing_percentages_ar_labs_original[i,1]
+
+  column_names_and_missing_percentages_ar_labs_original[i,"Percentage_complete"] <- 
+    round(100*
+      sum(!is.na(ar_labs_original[,c(each_column)])) / 
+      length(ar_labs_original[,c(each_column)]), digits=1)
+}
+
+dir.create("Column_Names_and_missing_percentages")
+
+write.csv(column_names_and_missing_percentages_ar_labs_original, 
+          "./Column_Names_and_missing_percentages/colnames_and_missing_percentage_ar_labs_original.csv", 
+          row.names=F)
+```
+
+```{r, create original versions of columns in order to compare at the end of the file how many have changed}
+#there are different named columns here that report the same thing
+ar_labs$original_assessment_date <-
+  ar_labs$assessment_date
+
+ar_labs$original_date_and_time <-
+  ar_labs$date_and_time
+
+ar_labs$assessment_date_original <-
+  ar_labs$assessment_date
+
+ar_labs$date_and_time_original <-
+  ar_labs$date_and_time
+
+ar_labs$labs_type_original <-
+  ar_labs$labs_type
+
+ar_labs$value_original <-
+  ar_labs$value
+
+ar_labs$marker_original <-
+  ar_labs$marker
+```
+
+```{r, prove assessment date and assessment_id are always on the same date}
+#paste assessment date and assessment id together
+ar_labs$assessment_date_check <- 
+  paste0(ar_labs$assessment_id, 
+         "_",
+         ar_labs$assessment_date)
+
+print("number of different assessment id's should be same as number of different assessment dates, therefore this number should be zero:")
+
+#count the number of the pasted assessment date and id and compare to number of assessment id's alone
+length(unique(ar_labs$assessment_date_check)) - length(unique(ar_labs$assessment_id))
+
+#then we can remove that column
+ar_labs$assessment_date_check <- NULL
+```
+
+```{r, remove all empty rows}
+#lets first show how many rows have no record id and no assessment id. as these empty rows are disconcerting when we remove duplicates
+ar_labs$empty_record_id_and_assessment_id <-
+  ifelse(
+    is.na(ar_labs$record_id) &
+    is.na(ar_labs$assessment_id),
+    1,
+    0
+  )
+number_of_empty_rows <- 
+  sum(ar_labs$empty_record_id_and_assessment_id)
+```
+
+
+```{r, remove exact duplicate entries from labs data}
+#straight away we can get rid of rows in this frame that are completely identical
+unique_ar_labs <- 
+  unique(ar_labs)
+
+print("number of rows in original file")
+
+nrow(unique_ar_labs)
+
+print("number of rows removed that are completely identical to another one in the ar labs extraction (not including empty rows):")
+
+number_of_exact_row_duplicates_removed <- 
+  nrow(ar_labs) - nrow(unique_ar_labs)
+
+number_of_exact_row_duplicates_removed - number_of_empty_rows
+
+ar_labs$duplicate_flag <- duplicated(ar_labs) | duplicated(ar_labs, fromLast = TRUE)
+
+```
+
+```{r, remove duplicate entries from labs data with different assessment_id}
+#for duplicate combinations we can just crudely paste together columns of interest
+unique_ar_labs$unique_combination_paste <-
+  paste0(unique_ar_labs$record_id, 
+         unique_ar_labs$assessment_date, 
+         unique_ar_labs$labs_type, 
+         unique_ar_labs$date_and_time, 
+         unique_ar_labs$value, 
+         unique_ar_labs$centreName)
+
+#then we assess the frequencies
+duplication_check <- 
+  subset(rownames_to_column(
+    as.data.frame(freq(
+      unique_ar_labs$unique_combination_paste))),
+         rowname!="<NA>" & 
+      rowname!="Total" & Freq > 1)
+
+#take those rows out to review
+ar_labs_duplications_to_rationalise <- 
+  subset(unique_ar_labs, unique_combination_paste %in% duplication_check$rowname)
+
+#within the original frame then remove all duplications
+ar_labs_duplications_removed <-
+  subset(unique_ar_labs, !(unique_combination_paste %in% duplication_check$rowname))
+
+print("The following number should be zero:")  
+
+nrow(ar_labs_duplications_removed) + 
+  nrow(ar_labs_duplications_to_rationalise) - 
+  nrow(unique_ar_labs)
+
+#within the duplication frame we can slice_max using the assessment_id
+ar_labs_duplications_to_bind_back <-
+  ar_labs_duplications_to_rationalise %>%
+  group_by(unique_combination_paste) %>%
+  slice_max(order_by=assessment_id,
+            n=1,
+            with_ties = F
+            )
+
+#now we can bind them back
+ar_labs_without_duplications <-
+  rbind(ar_labs_duplications_removed,
+        ar_labs_duplications_to_bind_back)
+
+print("removing duplications with different assessment ids has resulted in the removal of the following number of rows:")
+
+number_duplicated_with_different_assessment_id <- 
+  nrow(unique_ar_labs) - nrow(ar_labs_without_duplications)
+
+number_duplicated_with_different_assessment_id
+
+print("Original number of rows in frame")
+
+nrow(ar_labs_original)
+
+print("Total number of duplicated rows and empty rows removed is:")
+
+number_of_exact_row_duplicates_removed + number_duplicated_with_different_assessment_id
+
+print("Number of patients that had duplicated entries:")
+
+length(unique(ar_labs_duplications_to_rationalise$record_id))
+
+#now we can rationalise the frame name
+ar_labs <- 
+  ar_labs_without_duplications
+```
+
+
+```{r, lag columns to diagnose differences between date_and_time within assessment_id and differences in chronology}
+#now we have one reading per assessment id, we can order by id, ready to lag the frame
+ar_labs <- 
+  ar_labs[order(ar_labs$record_id,
+                           ar_labs$assessment_id),] 
+
+#lag the record_id
+ar_labs$lag_record_id <- 
+  lag(ar_labs$record_id)
+
+#lag the assessment_id
+ar_labs$lag_assessment_id <- 
+  lag(ar_labs$assessment_id)
+
+#make a posix visit date
+ar_labs$labs_visit_date <- 
+  as.POSIXct(ar_labs$assessment_date, format="%d/%m/%Y")
+write.csv(ar_labs$labs_visit_date , "visitcheck1.csv")
+
+#we also want an id and labs_visit_date paste to check against a list of longitudinal visit dates pasted to the ids
+ar_labs$id_labs_visit_date_check <- 
+  paste0(ar_labs$record_id, 
+         "_",
+         ar_labs$labs_visit_date)
+
+#lag the visit date
+ar_labs$lag_labs_visit_date <- 
+  lag(ar_labs$labs_visit_date)
+write.csv(ar_labs$lag_labs_visit_date , "visitcheck2.csv")
+
+#flag if the previous visit date is afterwards in time than the current visit date
+ar_labs$same_patient_back_in_time <-
+  ifelse(ar_labs$record_id==ar_labs$lag_record_id &
+           difftime(ar_labs$lag_labs_visit_date, 
+                    ar_labs$labs_visit_date, units="days") > 0,
+         1,
+         0)
+
+#lag the date_and_time
+ar_labs$lag_date_and_time <- 
+  lag(ar_labs$date_and_time)
+
+#flag different date_and_time within assessment_id
+ar_labs$different_date_and_time_within_same_assessment_id <-
+  ifelse(ar_labs$assessment_id==ar_labs$lag_assessment_id &
+         ar_labs$date_and_time!= ar_labs$lag_date_and_time,
+         1,
+         0)
+
+all_ar_labs_with_different_date_and_time_within_same_assessment_id <-
+  subset(ar_labs , different_date_and_time_within_same_assessment_id==1)
+
+all_ar_labs_without_different_date_and_time_within_same_assessment_id <-
+  subset(ar_labs , different_date_and_time_within_same_assessment_id==0)
+
+all_ar_labs_without_date_and_time <-
+  subset(ar_labs , is.na(date_and_time))
+
+print("the following number should be zero to show we aren't losing any rows from separating into those patients with and without different date and time within the same assessment id")
+
+length(nrow(all_ar_labs_with_different_date_and_time_within_same_assessment_id) +
+         nrow(all_ar_labs_without_different_date_and_time_within_same_assessment_id) +
+         nrow(all_ar_labs_without_date_and_time$date_and_time) -
+         nrow(ar_labs))
+```
+
+```{r, calculate differences between labs visit date and labs marker date}
+#we compare ar_labs$labs_visit_date which we have already made above to the visit_date that we must extract first from the date and time column:
+
+ar_labs$labs_date_from_date_and_time_of_measurement <-
+  as.POSIXct(
+    gsub(x=ar_labs$date_and_time,
+       pattern="T.*",
+       replacement=""), format="%Y-%m-%d")
+
+#paste together the id and the date that we take from the actual blood readings. We can then use this to detect if that date is seen in a longitudinal visit. This will help us see if the labs visit date is likely to be wrong, or if is the labs date and time of measurement that is wrong
+
+ar_labs$id_labs_date_from_date_and_time_of_measurement_check <- 
+  paste0(ar_labs$record_id, 
+         "_",
+         ar_labs$labs_date_from_date_and_time_of_measurement)
+
+#we can  detect if the labs date from the measurement of marker is present in the longitudinal data
+ar_labs$labs_date_and_time_present_in_longitudinal_data <-
+  ifelse(ar_labs$id_labs_date_from_date_and_time_of_measurement_check %in% 
+           longitudinal_id_visit_dates_vector_to_check,
+         1,
+         0)
+
+#take the difference between the labs visit date, and the date from the measurement of marker in the labs frame
+ar_labs$labs_visit_date_labs_reading_date_difference_in_days <-
+  as.numeric(difftime(ar_labs$labs_visit_date, 
+           ar_labs$labs_date_from_date_and_time_of_measurement,
+           units="days"))
+
+#give that a flag if we have a difference between the labs visit date and the labs taken from the marker reading
+ar_labs$internal_date_difference <- 
+  ifelse(ar_labs$labs_visit_date_labs_reading_date_difference_in_days!=0,
+         1,
+         0)
+
+#we use the vector of id_visit_dates from the longitudinal visits to tell us whether that id and visit date from the labs visits is present
+ar_labs$labs_assessment_date_present_in_longitudinal_data <-
+  ifelse(ar_labs$id_labs_visit_date_check %in% 
+           longitudinal_id_visit_dates_vector_to_check,
+         1,
+         0)
+
+#give us another flag for there being an internal_date_difference and the labs_visit_date not being in longitudinal data
+ar_labs$internal_date_difference_AND_visit_NOT_present_in_longitudinal_data <-
+  ifelse(ar_labs$labs_assessment_date_present_in_longitudinal_data==0 &
+         ar_labs$labs_visit_date_labs_reading_date_difference_in_days==1,
+         1,
+         0)
+
+```
+
+```{r, share date_and_time of lab measurements with other measurements within the same visit if the date_and_time is missing}
+#take out all the rows from assessments that contain one assessment that doesn't have a date_and_time. If there are some date_and_time values in this, then they may be able to be shared with the missing data
+ar_labs_with_shareable_date_and_time <-
+  subset(ar_labs, assessment_id %in% all_ar_labs_without_date_and_time$assessment_id)
+
+#because that frame does have some date_and_time in it, we know that some of the NA date_and_time could potentially be shareable. This is certainly an assumption, but one that is better than just using the visit_date which Jillian mentioned - it's more likely all the bloods were done on the same day
+#take out just the assessment_id and date_and_time because that's all we want to join back in, and make it unique
+ar_labs_with_shareable_date_and_time <-
+  unique(ar_labs_with_shareable_date_and_time[,c(
+    "assessment_id",
+    "date_and_time")])
+
+#subset just the dates_and_times present to share and join back in by getting rid of na's
+ar_labs_with_shareable_date_and_time_to_join <-
+  subset(
+    ar_labs_with_shareable_date_and_time, !is.na(date_and_time)
+  )
+
+#rename the column we want to join back in 
+names(ar_labs_with_shareable_date_and_time_to_join)[names(
+  ar_labs_with_shareable_date_and_time_to_join)=="date_and_time"] <- 
+  "shareable_date_and_time_from_same_assessment_id"
+print("number of shareable dates and times that we can use amongst readings within the same assessment_id:")
+nrow(ar_labs_with_shareable_date_and_time_to_join)
+
+#we find that some of the shareable dates actually have multiple dates, and therefore can't be easily joined. We need to filter these out
+assessment_ids_with_too_many_shareable_dates <-
+  as.vector(
+    subset(
+      rownames_to_column(
+        as.data.frame(
+          freq(
+            ar_labs_with_shareable_date_and_time_to_join$assessment_id))), 
+      rowname!="Total" & 
+        rowname!="<NA>" & 
+        Freq>1)$rowname)
+
+#we can then use that vector of assessment_ids to alter that shareable date_and_time
+ar_labs_with_shareable_date_and_time_to_join$shareable_date_and_time_from_same_assessment_id <-
+  ifelse(ar_labs_with_shareable_date_and_time_to_join$assessment_id %in%
+           assessment_ids_with_too_many_shareable_dates,
+         "more_than_one_possible_shareable_date_and_time",
+         ar_labs_with_shareable_date_and_time_to_join$shareable_date_and_time_from_same_assessment_id)
+
+#now this can be made unique so that we don't have a many to one relationship when we join
+ar_labs_with_shareable_date_and_time_to_join <-
+  unique(ar_labs_with_shareable_date_and_time_to_join)
+
+#now join our shareable dates
+ar_labs_with_shareable_date_and_times_joined <-
+  left_join(ar_labs, 
+            ar_labs_with_shareable_date_and_time_to_join,
+            by = join_by(assessment_id))
+
+print("we started with this many rows:")
+nrow(ar_labs)
+
+print("joined this many rows:")
+nrow(ar_labs_with_shareable_date_and_time_to_join)
+
+print("and are left with this many rows:")
+nrow(ar_labs_with_shareable_date_and_times_joined)
+
+print("so this number should be zero:")
+nrow(ar_labs_with_shareable_date_and_times_joined) -
+  nrow(ar_labs)
+
+#we can then rationalise the file name
+ar_labs <- 
+  ar_labs_with_shareable_date_and_times_joined
+
+#now we have our shareable dates and times in the correct frame, we can replace NA's with the shareable dates and times
+ar_labs$date_and_time <-
+  ifelse(is.na(ar_labs$date_and_time) &
+           !is.na(ar_labs$shareable_date_and_time_from_same_assessment_id) &
+           ar_labs$shareable_date_and_time_from_same_assessment_id!="more_than_one_possible_shareable_date_and_time",
+         ar_labs$shareable_date_and_time_from_same_assessment_id,
+         ar_labs$date_and_time)
+```
+
+```{r, establish patients with different date_and_time within the same assessment_id}
+patients_with_different_date_and_time_within_same_assessment_id <-
+  unique(all_ar_labs_with_different_date_and_time_within_same_assessment_id$record_id)
+
+patients_without_different_date_and_time_within_same_assessment_id <-
+  unique(all_ar_labs_without_different_date_and_time_within_same_assessment_id$record_id)
+
+print("number of patients_with_different_date_and_time_within_same_assessment_id")
+
+length(patients_with_different_date_and_time_within_same_assessment_id)
+
+#establish which assessment_dates have a variable date_and_time for the same visit_date
+
+ar_labs$back_in_time_AND_visit_NOT_present_in_longitudinal_data <-
+  ifelse(ar_labs$labs_assessment_date_present_in_longitudinal_data==0 &
+         ar_labs$same_patient_back_in_time==1,
+         1,
+         0)
+
+print("the number who have an entry from a previous time later on is:")
+sum(ar_labs$same_patient_back_in_time, na.rm=T)
+
+print("the number who have an entry for a date that isn't present in the longitudinal data is:")
+sum(ar_labs$labs_assessment_date_present_in_longitudinal_data==0)
+
+print("the number who have an entry for a date that isn't present in the longitudinal data AND is a back in time entry is:")
+sum(ar_labs$back_in_time_AND_visit_NOT_present_in_longitudinal_data, na.rm=T)
+```
+
+
+```{r, assessing entries that have been allied to a different visit date}
+#for duplicate combinations we can just crudely paste together columns of interest
+ar_labs$unique_combination_paste_2 <-
+  paste0(ar_labs$record_id, 
+         ar_labs$labs_type, 
+         ar_labs$date_and_time, 
+         ar_labs$value, 
+         ar_labs$centreName)
+
+#then we assess the frequencies
+duplication_check_2 <- 
+  subset(rownames_to_column(
+    as.data.frame(freq(
+      ar_labs$unique_combination_paste_2))),
+         rowname!="<NA>" & 
+         rowname!="Total" & 
+         Freq > 1)
+
+#take those rows out to review
+ar_labs_duplications_to_review_2 <- 
+  subset(ar_labs, unique_combination_paste_2 %in% duplication_check_2$rowname)
+
+#this time, if we have a missing date_and_time we are on a hiding to nothing, because this likely is simply from a different visit and the date_and_time are missing, rather than them being an inadvertent duplication. So get rid of NA's
+ar_labs_duplications_to_review_2 <-
+  subset(ar_labs_duplications_to_review_2, 
+         !is.na(date_and_time))
+
+#first we establish a vector of those unique_combination_paste_2 that has either of the entries in the longitudinal frame by subsetting
+ar_labs_duplications_to_review_2_in_longitudinal_data <-
+  subset(ar_labs_duplications_to_review_2, labs_assessment_date_present_in_longitudinal_data==1)
+
+#we can take out a vector of the unique_combination_paste_2 that has a reading present in longitudinal data
+unique_combination_paste_2_has_a_labs_assessment_date_present_in_longitudinal_data <-
+  ar_labs_duplications_to_review_2_in_longitudinal_data$unique_combination_paste_2
+
+#now we turn that into a column in the frame for us to be able to refer to within an ifelse statement
+ar_labs_duplications_to_review_2$unique_combination_paste_2_has_a_labs_assessment_date_present_in_longitudinal_data <-
+  ifelse(ar_labs_duplications_to_review_2$unique_combination_paste_2 %in% 
+           unique_combination_paste_2_has_a_labs_assessment_date_present_in_longitudinal_data,
+         1,
+         0)
+
+ar_labs_duplications_to_review_2$duplication_of_same_blood_test_allied_to_wrong_visit_date_to_remove <-
+  ifelse(ar_labs_duplications_to_review_2$unique_combination_paste_2_has_a_labs_assessment_date_present_in_longitudinal_data==1 &
+           ar_labs_duplications_to_review_2$labs_assessment_date_present_in_longitudinal_data==0,
+         1,
+         0)
+
+ar_labs_duplications_to_review_2_in_longitudinal_data_and_zero_difference_between_dates <-
+  subset(ar_labs_duplications_to_review_2_in_longitudinal_data, 
+         labs_visit_date_labs_reading_date_difference_in_days==0)
+
+nrow(ar_labs_duplications_to_review_2_in_longitudinal_data_and_zero_difference_between_dates)
+
+unique_combination_paste_2_has_a_labs_assessment_date_present_in_longitudinal_data_and_zero_difference_between_dates <-
+  ar_labs_duplications_to_review_2_in_longitudinal_data_and_zero_difference_between_dates$unique_combination_paste_2
+
+#now we turn that into a column in the frame for us to be able to refer to within an ifelse statement
+ar_labs_duplications_to_review_2$unique_combination_paste_2_has_a_labs_assessment_date_present_in_longitudinal_data_and_zero_difference_between_dates <-
+  ifelse(ar_labs_duplications_to_review_2$unique_combination_paste_2 %in% 
+           unique_combination_paste_2_has_a_labs_assessment_date_present_in_longitudinal_data_and_zero_difference_between_dates,
+         1,
+         0)
+
+#now we can flag them to remove, if they don't have zero difference between dates but their duplicate does
+ar_labs_duplications_to_review_2$flag_for_removal <-
+  ifelse(ar_labs_duplications_to_review_2$unique_combination_paste_2_has_a_labs_assessment_date_present_in_longitudinal_data_and_zero_difference_between_dates==1 &
+           ar_labs_duplications_to_review_2$labs_visit_date_labs_reading_date_difference_in_days!=0,
+         1,
+         0)
+
+#we remove them from this frame, that will be manually reviewed
+ar_labs_duplications_to_review_2 <-
+  subset(ar_labs_duplications_to_review_2, flag_for_removal==0)
+
+#we also need to remove them from the main frame 
+ar_labs_duplications_to_remove <-
+  subset(ar_labs_duplications_to_review_2, flag_for_removal==1)
+
+print("ar_labs number of rows before duplications removed:")
+nrow(ar_labs)
+
+#then we take those out of the main frame:
+ar_labs <-
+  subset(ar_labs, !(unique_combination_paste_2 %in% ar_labs_duplications_to_remove$unique_combination_paste_2))
+
+print("ar_labs number of rows after duplications removed:")
+nrow(ar_labs)
+
+print("it's possible those two numbers are the same if there aren't any duplications")
+
+#after that we have to perform manual review, because its just too difficult to say which is the correct visit date to ally these tests to 
+#to perform manual review, we need all the readings for the patients within the frame ar_labs_duplications_to_review_2
+patients_with_duplicated_bloods_allied_to_different_visits <-
+  unique(ar_labs_duplications_to_review_2$record_id)
+
+ar_labs_full_frame_duplications_to_review_2 <-
+  subset(ar_labs, 
+         record_id %in% patients_with_duplicated_bloods_allied_to_different_visits)
+
+#wihthin that frame flag the rows to review
+ar_labs_full_frame_duplications_to_review_2$review_duplicate_lab_different_visit <-
+  ifelse(ar_labs_full_frame_duplications_to_review_2$assessment_id %in%
+           ar_labs_duplications_to_review_2$assessment_id,
+         1,
+         0)
+
+write.csv(ar_labs_full_frame_duplications_to_review_2, 
+          "ar_labs_full_frame_duplications_to_review_2.csv", 
+          row.names = F)
+
+```
+
+
+
+```{r, take out all of the readings for patients who have been flagged for manual review as back in time AND not in longitudinal data}
+#filtering to check any back in time:
+
+#first we check which patients have chronological reversed rows by taking out those rows from the frame
+ar_labs_chronological_reversed_rows <-
+  ar_labs %>%
+  filter(back_in_time_AND_visit_NOT_present_in_longitudinal_data==1) 
+
+#then take the patients out of that frame so we know which patients have any chronologically reversed rows
+patients_with_chronological_reversed_rows <-
+  ar_labs_chronological_reversed_rows$record_id
+
+#and correct that total frame to include all the visits from the flagged patients
+ar_labs_from_patients_with_chronological_reversed_rows <-
+  subset(ar_labs, record_id %in% patients_with_chronological_reversed_rows)
+
+#then we want rows with different date_and_time within the same assessment_id
+ar_labs_rows_with_different_date_and_time_within_same_assessment_id <-
+  ar_labs %>%
+  filter(different_date_and_time_within_same_assessment_id==1) 
+
+#then we take patients with rows with different date_and_time within the same assessment_id
+patients_with_rows_with_different_date_and_time_within_same_assessment_id <-
+  unique(ar_labs_rows_with_different_date_and_time_within_same_assessment_id$record_id)
+
+#now we need to correct that frame so we get all the rows for those patients
+ar_labs_rows_from_patients_with_different_date_and_time_within_same_assessment_id <-
+  ar_labs %>%
+  filter(record_id %in% patients_with_rows_with_different_date_and_time_within_same_assessment_id)
+
+#then we want other patients - patients that only have rows with the same date_and_time within the same_assessment_id. This is the compliment of those with different ones, so first get a list of all patients
+all_patient_ids_in_labs_frame <-
+  unique(ar_labs$record_id)
+
+#use not in to take the patents with the same date_and-time within same_assessment_id
+ar_labs_rows_from_patients_with_same_date_and_time_within_same_assessment_id <-
+  ar_labs %>%
+  filter(!(record_id %in% patients_with_rows_with_different_date_and_time_within_same_assessment_id))
+
+#then we take patients with same date_and_time_within the same assessment_id
+patients_with_rows_with_same_date_and_time_within_same_assessment_id <-
+  unique(ar_labs_rows_from_patients_with_same_date_and_time_within_same_assessment_id$record_id)
+
+print("this number should be zero, to prove that we have the full number of patients accounted for:")
+length(all_patient_ids_in_labs_frame)-
+  length(patients_with_rows_with_different_date_and_time_within_same_assessment_id)-
+  length(patients_with_rows_with_same_date_and_time_within_same_assessment_id)
+
+print("this number should be zero, to prove that we have the full number of rows accounted for:")
+nrow(ar_labs)-
+  nrow(ar_labs_rows_from_patients_with_different_date_and_time_within_same_assessment_id)-
+  nrow(ar_labs_rows_from_patients_with_same_date_and_time_within_same_assessment_id)
+
+#we can now separately assess those that have a chronological data entry flag in those with a the same date_and_time within assessment id, which can be done in a frame with just one row per assessment_id
+
+ar_labs_chronological_reversed_rows_with_same_date_and_time_throughout_assessment_to_review <-
+  subset(ar_labs_from_patients_with_chronological_reversed_rows,
+         record_id %in% patients_with_rows_with_same_date_and_time_within_same_assessment_id)
+
+#because we know the date_and_time is the same throughout the assessment_id in these patients, we can take out just the top row of assessment_id 
+
+ar_labs_chronological_reversed_rows_with_same_date_and_time_throughout_assessment_to_review <- 
+  ar_labs_chronological_reversed_rows_with_same_date_and_time_throughout_assessment_to_review %>%
+  group_by(assessment_id) %>%
+  slice_max(assessment_id,
+           n=1,
+            with_ties = F)
+
+#order before printing to csv
+
+ar_labs_chronological_reversed_rows_with_same_date_and_time_throughout_assessment_to_review <- 
+  ar_labs_chronological_reversed_rows_with_same_date_and_time_throughout_assessment_to_review[
+    order(
+      ar_labs_chronological_reversed_rows_with_same_date_and_time_throughout_assessment_to_review$record_id,
+      ar_labs_chronological_reversed_rows_with_same_date_and_time_throughout_assessment_to_review$assessment_id),] 
+
+#print that to csv for manual review
+write.csv(
+  ar_labs_chronological_reversed_rows_with_same_date_and_time_throughout_assessment_to_review,
+  "ar_labs_chronological_reversed_rows_with_same_date_and_time_throughout_assessment_to_review.csv", 
+  row.names = F)
+
+#we now secondly take those that have a chronological data entry flag in those with a DIFFERENT date_and_time within assessment id, which needs to be done in a frame with all of the markers visible
+
+ar_labs_chronological_reversed_rows_with_different_date_and_time_throughout_assessment_to_review <-
+  subset(ar_labs_from_patients_with_chronological_reversed_rows,
+         record_id %in% patients_with_rows_with_different_date_and_time_within_same_assessment_id)
+
+#we don't slice this one, we need all the rows, just print it
+
+#order before printing
+ar_labs_chronological_reversed_rows_with_different_date_and_time_throughout_assessment_to_review <- 
+  ar_labs_chronological_reversed_rows_with_different_date_and_time_throughout_assessment_to_review[
+    order(
+      ar_labs_chronological_reversed_rows_with_different_date_and_time_throughout_assessment_to_review$record_id,
+      ar_labs_chronological_reversed_rows_with_different_date_and_time_throughout_assessment_to_review$assessment_id),] 
+
+#print that to csv for manual review
+write.csv(ar_labs_chronological_reversed_rows_with_different_date_and_time_throughout_assessment_to_review,
+          "ar_labs_chronological_reversed_rows_with_different_date_and_time_throughout_assessment_to_review.csv", 
+          row.names = F)
+
+```
+
+
+```{r, plot of visit dates and lab dates to diagnose incorrectly allied visits}
+#note here you can change this to original_assessment_date and original_date_and_time to get what happened before the changes
+original_data_to_plot <-
+  rownames_to_column(
+    ar_labs[,c(
+      "record_id",
+      "assessment_id",
+      "original_assessment_date",
+      "original_date_and_time")])
+
+#note here you can change this to original_assessment_date and original_date_and_time to get what happened before the changes
+adjusted_data_to_plot <-
+  rownames_to_column(
+    ar_labs[,c(
+      "record_id",
+      "assessment_id",
+      "assessment_date",
+      "labs_date_from_date_and_time_of_measurement")])
+
+#make the data types approrpiate
+adjusted_data_to_plot$rowname <- 
+  as.numeric(adjusted_data_to_plot$rowname)
+
+original_data_to_plot$rowname <- 
+  as.numeric(original_data_to_plot$rowname)
+
+#make dates appropriate posix objects
+adjusted_data_to_plot$assessment_date <- 
+  as.POSIXct(adjusted_data_to_plot$assessment_date, 
+             format="%d/%m/%Y")
+
+adjusted_data_to_plot$labs_date_from_date_and_time_of_measurement <- 
+  as.POSIXct(adjusted_data_to_plot$labs_date_from_date_and_time_of_measurement, 
+             format="%Y-%m-%d")
+
+original_data_to_plot$assessment_date <- 
+  as.POSIXct(original_data_to_plot$original_assessment_date, 
+             format="%d/%m/%Y")
+
+original_data_to_plot$labs_date_from_date_and_time_of_measurement <- 
+  as.POSIXct(original_data_to_plot$original_date_and_time, 
+             format="%Y-%m-%d")
+
+#make the data longer to facilitate a gg plot where we can join the dates with lines
+adjusted_data_to_plot_long <- 
+  pivot_longer(
+    data=adjusted_data_to_plot,
+    cols=c("assessment_date", 
+           "labs_date_from_date_and_time_of_measurement"),
+    names_to="date_type",
+    values_to="date_value"
+  )
+
+original_data_to_plot_long <- 
+  pivot_longer(
+    data=original_data_to_plot,
+    cols=c("assessment_date", 
+           "labs_date_from_date_and_time_of_measurement"),
+    names_to="date_type",
+    values_to="date_value"
+  )
+
+#make the names more palatable for the axis
+adjusted_data_to_plot_long$date_type <-
+  ifelse(adjusted_data_to_plot_long$date_type=="labs_date_from_date_and_time_of_measurement",
+         "labs_date",
+         adjusted_data_to_plot_long$date_type)
+
+adjusted_data_to_plot_long$date_type <-
+  ifelse(adjusted_data_to_plot_long$date_type=="assessment_date",
+         "visit_date",
+         adjusted_data_to_plot_long$date_type)
+
+original_data_to_plot_long$date_type <-
+  ifelse(original_data_to_plot_long$date_type=="labs_date_from_date_and_time_of_measurement",
+         "labs_date",
+         original_data_to_plot_long$date_type)
+
+original_data_to_plot_long$date_type <-
+  ifelse(original_data_to_plot_long$date_type=="assessment_date",
+         "visit_date",
+         original_data_to_plot_long$date_type)
+
+#make a ggplot
+for(id_to_plot in unique(ar_labs$record_id)){
+
+    
+adjusted_data_to_plot <-
+  subset(adjusted_data_to_plot_long, record_id==id_to_plot)
+
+original_data_to_plot <-
+  subset(original_data_to_plot_long, record_id==id_to_plot)
+
+#render a plot with adjusted data
+adjusted_plot <- 
+  ggplot(data=adjusted_data_to_plot,
+       aes(x=date_value, y=date_type)) +
+  geom_vline(
+    data=subset(ar_participants_longitudinal_visit_dates, id==id_to_plot),
+    aes(xintercept=longitudinal_visit_date), colour="green", alpha=0.5) +
+  geom_vline(
+    data=subset(adjusted_data_to_plot, date_type=="visit_date"),
+    aes(xintercept=date_value), colour="red", alpha=0.5) +
+  geom_vline(
+    data=subset(adjusted_data_to_plot, date_type=="labs_date"),
+    aes(xintercept=date_value), colour="blue", alpha=0.5) +
+  geom_line(aes(group=rowname)) +
+  geom_text(aes(label=assessment_id, y=2.3), angle=90, vjust=0) +
+  geom_point() +
+  labs(title=paste0("Adjusted data: Patient ID = ", id_to_plot),
+       subtitle="assessment ID is annotated for manual review") +
+  themepowerpointtitle
+adjusted_plot
+
+#render the same plot with original data
+original_plot <- 
+  ggplot(data=original_data_to_plot,
+       aes(x=date_value, y=date_type)) +
+  geom_vline(
+    data=subset(ar_participants_longitudinal_visit_dates, id==id_to_plot),
+    aes(xintercept=longitudinal_visit_date), colour="green", alpha=0.5) +
+  geom_vline(
+    data=subset(original_data_to_plot, date_type=="visit_date"),
+    aes(xintercept=date_value), colour="red", alpha=0.5) +
+  geom_vline(
+    data=subset(original_data_to_plot, date_type=="labs_date"),
+    aes(xintercept=date_value), colour="blue", alpha=0.5) +
+  geom_line(aes(group=rowname)) +
+  geom_text(aes(label=assessment_id, y=2.3), angle=90, vjust=0) +
+  geom_point() +
+  labs(title=paste0("Original data: Patient ID = ", id_to_plot),
+       subtitle="assessment ID is annotated for manual review") +
+  themepowerpointtitle
+original_plot
+
+#plot just the adjusted plot into a folder
+dir.create("lab_date_plots")
+print("saving plot for id: ")
+print(id_to_plot)
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./lab_date_plots/", 
+       plot = adjusted_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+
+#plot just the adjusted plot into a folder
+dir.create("lab_date_plots/original_alone")
+
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./lab_date_plots/original_alone", 
+       plot = original_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+
+#plot both adjusted and original in another separate folder
+dir.create("lab_date_plots/original_comparison")
+
+#make a grid_plot
+grid_plot <-
+  grid.arrange(adjusted_plot, 
+               original_plot, 
+               ncol=1)
+
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./lab_date_plots/original_comparison/", 
+       plot = grid_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+
+
+}
+
+```
+
+
+****************
+shaping corrected labs data
+****************
+
+```{r, refine id and times and visit dates}
+ar_labs$row_number <- 
+  as.integer(rownames(ar_labs))
+
+ar_labs$labs_centre_name <- 
+  ar_labs$centreName
+
+ar_labs$centreName <- NULL
+
+ar_labs$id <- 
+  as.integer(ar_labs$record_id)
+
+ar_labs$visit_date <- 
+  as.POSIXct(ar_labs$assessment_date, format="%d/%m/%Y")
+write.csv(ar_labs$visit_date , "visitcheck3.csv")
+
+ar_labs$labs_date <- 
+  as.POSIXct(gsub("T.*"  , "",   ar_labs$date_and_time), format="%Y-%m-%d")
+
+ar_labs$labs_time <- 
+  gsub(".*T"  , "",   ar_labs$date_and_time)
+
+ar_labs$labs_hour <- 
+  gsub(":.*"  , "",   ar_labs$labs_time)
+
+ar_labs$labs_minutes <- 
+  sub(":.."  , "", sub("..:"  , "",   ar_labs$labs_time))
+
+ar_labs$labs_seconds <- 
+  gsub(".*:"  , "",   ar_labs$labs_time)
+
+ar_labs$labs_date_time <- 
+  as.POSIXct(paste(ar_labs$labs_date, ar_labs$labs_time) , format="%Y-%m-%d %H:%M:%S")
+
+ar_labs$id_visit_date <- paste(ar_labs$id , ar_labs$visit_date, sep="_")
+
+```
+
+```{r, paste columns together to be able to group similar dates times and markers }
+ar_labs$marker <- 
+  ar_labs$labs_type
+
+ar_labs$id_visit_date_marker <- 
+  paste(ar_labs$id , 
+        ar_labs$visit_date, 
+        ar_labs$marker)
+
+ar_labs$id_visit_date_marker_labs_date <- 
+  paste(ar_labs$id , 
+        ar_labs$visit_date, 
+        ar_labs$marker,
+        ar_labs$labs_date
+        )
+
+ar_labs$id_visit_date_marker_labs_date_time <- 
+  paste(ar_labs$id , 
+        ar_labs$visit_date, 
+        ar_labs$marker,
+        ar_labs$labs_date_time)
+
+ar_labs_id_visit_date_marker_labs_date_time_frequencies <-
+  as.data.frame(freq(ar_labs$id_visit_date_marker_labs_date_time))
+```
+
+```{r, remove rows with duplications in the columns we care about}
+ar_labs_duplications_completely_removed <- 
+  ar_labs %>% 
+  add_count(record_id, 
+            assessment_date, 
+            labs_type, 
+            date_and_time, 
+            labs_centre_name) %>% 
+  filter(n == 1)
+
+#extract the id_visit_date s with duplicated rows in the original frame
+#this is people who have duplications for the listed columns
+
+ar_labs_with_duplicated_rows <- 
+  ar_labs %>% 
+  add_count(record_id, 
+            assessment_date, 
+            labs_type, 
+            date_and_time, 
+            labs_centre_name) %>% 
+  filter(n > 1)
+
+write.csv(ar_labs_with_duplicated_rows, "ar_labs_with_duplicated_rows.csv")
+
+#now we simply want to slice_max the assessment_id for any entry which has the same id_visit_date_marker_labs_date_time
+ar_labs_with_duplications_isolated_to_join_back <-
+  ar_labs_with_duplicated_rows %>% 
+  group_by(id_visit_date_marker_labs_date_time) %>%
+  slice_max(n=1, 
+            with_ties=F, 
+            order_by=assessment_id)
+
+#and now we can see which visits we're removing
+ar_labs_duplications_removed <-
+  subset(ar_labs_with_duplicated_rows, 
+         !(row_number %in% ar_labs_with_duplications_isolated_to_join_back$row_number))
+
+print("this number should be zero to show we've not lost any rows ")
+nrow(ar_labs_with_duplications_isolated_to_join_back) + 
+  nrow(ar_labs_duplications_removed) - 
+  nrow(ar_labs_with_duplicated_rows)
+
+```
+
+```{r, create a frame that now has no duplicate entries}
+#now we can create ar_labs_without_duplicated_rows by binding the ar_labs_unique_duplicated_rows to ar_labs_duplications_completely_removed
+ar_labs_without_duplicated_rows <-
+  rbind(
+    ar_labs_duplications_completely_removed,
+    ar_labs_with_duplications_isolated_to_join_back
+  )
+```
+
+```{r, check the frame that now has no duplicate entries}
+print("the following number should be zero to prove we haven't lost anything we haven't accounted for:")
+nrow(ar_labs_duplications_completely_removed) + nrow(ar_labs_with_duplicated_rows) - nrow(ar_labs)
+
+print("this is the number of duplicated rows in the labs frame that have been removed")
+nrow(ar_labs_with_duplicated_rows) - nrow(ar_labs_with_duplications_isolated_to_join_back)
+
+print("this number should be zero to show that we have just removed duplications of rows, not all data in duplicated rows")
+nrow(ar_labs) - 
+  nrow(ar_labs_without_duplicated_rows) - 
+  nrow(ar_labs_with_duplicated_rows) + 
+  nrow(ar_labs_with_duplications_isolated_to_join_back)
+```
+
+```{r, review the changed columns and print a sheet that records what we have changed}
+ar_labs$assessment_date_has_been_changed <-
+  ifelse(ar_labs$assessment_date != ar_labs$original_assessment_date,
+         1,
+         0)
+print("number of assessment dates changed:")
+sum(ar_labs$assessment_date_has_been_changed, na.rm=T)
+
+#for date_and_time we need a two step process. First check if the date_and_time was changed
+ar_labs$date_and_time_has_been_changed <-
+  ifelse(ar_labs$date_and_time != ar_labs$original_date_and_time & 
+           !is.na(ar_labs$date_and_time) & 
+           !is.na(ar_labs$original_date_and_time),
+         1,
+         0)
+print("Number of date_and_time that had a value and were changed:")
+sum(ar_labs$date_and_time_has_been_changed)
+
+#then check if the date_and_time was substituted for the assessment_date if it was NA
+ar_labs$date_and_time_has_been_changed <-
+  ifelse(is.na(ar_labs$original_date_and_time),
+         1,
+         ar_labs$date_and_time_has_been_changed)
+print("Number that didn't have a date_and_time")
+sum(is.na(ar_labs$date_and_time))
+
+print("Total number of altered date_and_time:")
+sum(ar_labs$date_and_time_has_been_changed)
+
+write.csv(ar_labs, "ar_labs_with_flags_after_all_manual_corrections.csv")
+```
+
+```{r, assess number of duplicate markers}
+ar_labs_without_duplicated_rows_id_visit_date_marker_labs_date_time_frequencies <-
+  as.data.frame(freq(ar_labs_without_duplicated_rows$id_visit_date_marker_labs_date_time))
+
+duplicate_markers <- 
+  rownames(
+    ar_labs_without_duplicated_rows_id_visit_date_marker_labs_date_time_frequencies %>% 
+             filter(Freq>1 & Freq <10000))
+
+duplicate_marker_frame <-
+  subset(ar_labs_without_duplicated_rows, 
+         id_visit_date_marker_labs_date_time %in% duplicate_markers)
+
+print("This frame should have nothing in it, so the number here should be zero:")
+nrow(duplicate_marker_frame)
+
+ar_labs_without_duplicated_rows_id_visit_date_marker_labs_date_time_frequencies <- NULL
+
+duplicate_marker_frame <- NULL
+
+print("the number of different id_visit_date_marker_labs_date_time that are different is")
+
+length(duplicate_markers)
+
+```
+
+Now we want to spread the frame, or pivot it wider, so that all labs taken on the same date are on the same line
+
+Remember that the assessment record date might not be the same as the labs date. We always have a visit_date in this frame, but we don't always have a labs_date
+
+what I want to spread is labs_type to make that into a column for each reading, and within that column we want the value of that marker
+
+for this to work, we first need to just pull out the important columns
+
+```{r, manual review of dates in labs frame}
+manual_review_visit_data <- 
+  as.data.frame(freq(ar_labs_without_duplicated_rows$visit_date))
+
+manual_review_labs_date <- 
+  as.data.frame(freq(ar_labs_without_duplicated_rows$labs_date))
+```
+
+######################################################################
+Using assessment_date if date_and_time is not present
+######################################################################
+
+```{r}
+print("We want to know how many rows in the ar_labs frame have an assessment_date, but have NA for their date_and_time:")
+
+print("Number with NA in assessment_date:")
+sum(is.na(ar_labs$assessment_date))
+
+print("Number with NA in date_and_time:")
+sum(is.na(ar_labs$date_and_time))
+
+#we can make the assumption of using the visit date first and foremost, if the date_and_time isn't present. 
+
+#to do this, we first need to get the assessment_date in a format to share that is the same as that entered into the frame
+
+ar_labs$assessment_date_to_share <-
+  as.character(as.POSIXct(ar_labs$assessment_date, format="%d/%m/%Y"))
+
+#add the time
+ar_labs$assessment_date_to_share <-
+  paste0(ar_labs$assessment_date_to_share,
+         "TOO:OO:OO")
+
+print("Here we use the assessment_date as a date_and_time if the date_and_time is NA, applied to the following number of rows:")
+sum(is.na(ar_labs$date_and_time))
+
+ar_labs$date_and_time <-
+  ifelse(is.na(ar_labs$date_and_time),
+         ar_labs$assessment_date_to_share,
+         ar_labs$date_and_time)
+
+print("The following number should now be zero showing that we have a date_and_time in every row:")
+
+sum(is.na(ar_labs$date_and_time))
+
+
+
+```
+
+```{r, prepare a frame without duplications to make wide}
+
+ar_labs_to_widen <- 
+  ar_labs_without_duplicated_rows[,c(
+    #"id",
+    "assessment_id", 
+    "id_visit_date", 
+    "marker",
+    "result",
+    "value",
+    "labs_centre_name",
+    "visit_date",
+    "labs_date_time")]
+
+print("Number without marker:")
+sum(is.na(ar_labs_to_widen$marker))
+
+ar_labs_to_widen$id_visit_date <- 
+  as.factor(ar_labs_to_widen$id_visit_date)
+
+
+```
+
+```{r, remove censoring variables and make results into numbers}
+print("Number without marker:")
+sum(is.na(ar_labs_to_widen$marker))
+
+ar_labs_to_widen$value_limit <- 
+  ifelse(grepl(">", 
+               ar_labs_to_widen$value) , 
+         ">", 
+         NA)
+
+ar_labs_to_widen$value_limit <- 
+  ifelse(grepl("<", 
+               ar_labs_to_widen$value) , 
+         "<", 
+         ar_labs_to_widen$value_limit)
+
+ar_labs_to_widen$value_units <- 
+  gsub(pattern="<", 
+       x=ar_labs_to_widen$value , 
+       replacement="")
+
+ar_labs_to_widen$value_units <- 
+  gsub(pattern=">", 
+       x=ar_labs_to_widen$value_units, 
+       replacement="")
+
+#I want to get rid of any numbers that have either a decimal point between them, or a comma which is a common typographical error and replace the comma with a point
+ar_labs_to_widen$value_units <- 
+  gsub(pattern="\\d", 
+       x=ar_labs_to_widen$value_units , 
+       replacement="")
+
+ar_labs_to_widen$value_units <- 
+  gsub(pattern="\\,", 
+       x=ar_labs_to_widen$value_units, 
+       replacement="")
+
+ar_labs_to_widen$value_units <- 
+  gsub(pattern="\\.", 
+       x=ar_labs_to_widen$value_units, 
+       replacement="")
+
+ar_labs_to_widen$value_units <- 
+  gsub(pattern="·", 
+       x=ar_labs_to_widen$value_units , 
+       replacement="")
+
+ar_labs_to_widen$value_units <- 
+  gsub(pattern="(?:\\s?)+·(?:\\s?)+", 
+       x=ar_labs_to_widen$value_units, 
+       replacement="")
+
+ar_labs_to_widen$value_units <- 
+  gsub(pattern="·", 
+       x=ar_labs_to_widen$value_units, 
+       replacement="")
+
+#remove all trailing or starting spaces
+ar_labs_to_widen$value_units <- 
+  gsub(pattern=" ", 
+       x=ar_labs_to_widen$value_units, 
+       replacement="")
+
+#remember to convert in order - i.e. mol/l, then convert nmol/l after. All the nmol/l will convert leaving the mol/l on their own unconverted
+
+print("Number without marker:")
+sum(is.na(ar_labs_to_widen$marker))
+
+#grams per decilitre
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mcg/dl", "µg/dl", NA)
+
+#international units per volume
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="uUI/ml", "µIU/ml", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="µUI/ml", "µIU/ml", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mcIU/mL", "µIU/ml", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="IU/L", "IU/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="iu/L", "IU/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="iU/L", "IU/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mcIU//ml", "µIU/ml", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mcIU/ml", "µIU/ml", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mcIU/L", "µIU/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mcui/ml", "µIU/ml", ar_labs_to_widen$units)
+
+#milliequivalents
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mEq/L", "mEq/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="meq/L", "mEq/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="meq/L", "mEq/l", ar_labs_to_widen$units)
+
+#moles
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mcmol/l", "µmol/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mcmol/ml", "µmol/ml", ar_labs_to_widen$units)
+
+#percentages
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mg%", "mg/dl", ar_labs_to_widen$units)
+
+print("Number without marker:")
+sum(is.na(ar_labs_to_widen$marker))
+
+#time
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mcg/h", "mcg/h", ar_labs_to_widen$units)
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mkg/h", "mg/kg/hr", ar_labs_to_widen$units)
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="ng/mL/h", "ng/ml/hr", ar_labs_to_widen$units)
+
+ar_labs_to_widen$units <- 
+  ifelse(grepl("ng/ml/hr" , ar_labs_to_widen$value_units), "ng/ml/hr", ar_labs_to_widen$units)
+
+ar_labs_to_widen$units <- 
+  ifelse(grepl("nmol/l/hr" , ar_labs_to_widen$value_units), "nmol/l/hr", ar_labs_to_widen$units)
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="nmol/l/h", "nmol/l/hr", ar_labs_to_widen$units)
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="nmol/l/hour", "nmol/l/hr", ar_labs_to_widen$units)
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="nmol/L/hour", "nmol/l/hr", ar_labs_to_widen$units)
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mol/l/h", "nmol/l/hr", ar_labs_to_widen$units)
+
+#correct ohp17 incorrect units after liaison with centres:
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mol/l" &
+           ar_labs_to_widen$marker=="ohp17", 
+         "nmol/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mmol/l" &
+           ar_labs_to_widen$marker=="ohp17", 
+         "nmol/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mg/ml" &
+           ar_labs_to_widen$marker=="ohp17", 
+         "ng/ml", ar_labs_to_widen$units)
+
+#correct androstenedione incorrect units after liaison with centres:
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mol/l" &
+           ar_labs_to_widen$marker=="andostenedione", 
+         "nmol/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mmol/l" &
+           ar_labs_to_widen$marker=="andostenedione", 
+         "nmol/l", ar_labs_to_widen$units)
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mg/ml" &
+           ar_labs_to_widen$marker=="andostenedione", 
+         "ng/ml", ar_labs_to_widen$units)
+
+#correct renin clear incorrect units after liaison with centres:
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mIU/ml" &
+           ar_labs_to_widen$marker=="renin", 
+         "µIU/ml", ar_labs_to_widen$units)
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mcIU/L" &
+           ar_labs_to_widen$marker=="renin", 
+         "µIU/ml", ar_labs_to_widen$units)
+
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="mg/ml" &
+           ar_labs_to_widen$marker=="renin", 
+         "ng/ml", ar_labs_to_widen$units)
+
+#global correction of IU/l to µIU/ml for renin just to make standardisation easier
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$units=="IU/l" &
+           ar_labs_to_widen$marker=="renin", 
+         "µIU/ml", ar_labs_to_widen$units)
+
+#sao paulo clearly a mistaken entry that just needs correcting
+ar_labs_to_widen$units <- 
+  ifelse(ar_labs_to_widen$value_units=="ng/ml" &
+           ar_labs_to_widen$marker=="renin" &
+           ar_labs_to_widen$labs_centre_name=="Sao Paulo - FMUSP - CAH", 
+         "µIU/ml", ar_labs_to_widen$units)
+
+units_original <- 
+  as.data.frame(freq(ar_labs_to_widen$value_units))
+
+units_corrected <- 
+  as.data.frame(freq(ar_labs_to_widen$units))
+
+#once we have the units all standardised, we can correct globally for renin documented with values of plasma renin activity. If the units are nmol/l/hr, then this reading is actually a plasma renin activity, as you don't measure renin in units per hour, you only measure plasma renin activity
+sum(is.na(ar_labs_to_widen$marker))
+
+ar_labs_to_widen$marker <-
+  ifelse(ar_labs_to_widen$units=="nmol/l/hr" & 
+           !is.na(ar_labs_to_widen$units),
+         "plasma_renin_activity",
+         ar_labs_to_widen$marker)
+
+print("Number without marker:")
+sum(is.na(ar_labs_to_widen$marker))
+
+```
+
+now take out the number itself from the value column, and turn it into a numeric variable
+
+```{r, ensure values are numbers and remove comma typos}
+ar_labs_to_widen$value_number <- 
+  gsub(pattern="<", 
+       x=ar_labs_to_widen$value , 
+       replacement="")
+
+ar_labs_to_widen$value_number <- 
+  gsub(pattern=">", 
+       x=ar_labs_to_widen$value_number , 
+       replacement="")
+
+#this keeps all numbers that have a comma, then keeps all numbers that have a point. Then we can compare those numbers - if the columns are equal, they are whole numbers. If one of the columns as a point, then that's the number. If one of the columns has a comma, that was a typo and it needs converting to a point
+
+ar_labs_to_widen$value_number_comma <- 
+  gsub(pattern="[^0-9,-]", 
+       x=ar_labs_to_widen$value_number , 
+       replacement="")
+
+ar_labs_to_widen$value_number_point <- 
+  gsub(pattern="[^0-9.-]", 
+       x=ar_labs_to_widen$value_number , 
+       replacement="")
+
+ar_labs_to_widen$number_corrected_for_commas <- 
+  ifelse(ar_labs_to_widen$value_number_comma==ar_labs_to_widen$value_number_point ,
+         ar_labs_to_widen$value_number_point, 
+         NA )
+
+ar_labs_to_widen$number_corrected_for_commas <- 
+  ifelse(grepl(",", ar_labs_to_widen$value_number_comma), 
+         gsub(x=ar_labs_to_widen$value_number_comma, 
+              pattern=",", 
+              replacement="."), 
+         ar_labs_to_widen$number_corrected_for_commas)
+
+ar_labs_to_widen$number_corrected_for_commas <- 
+  ifelse(grepl("\\.", ar_labs_to_widen$value_number_point), 
+         ar_labs_to_widen$value_number_point, 
+         ar_labs_to_widen$number_corrected_for_commas)
+
+check_frame <- 
+  ar_labs_to_widen[,c("value", "number_corrected_for_commas")]
+
+check_frame$difference_between_value_and_corrected_value <- 
+  as.numeric(check_frame$value) - 
+  as.numeric(check_frame$number_corrected_for_commas)
+
+print("this number should be zero to show that our tidying of comma typo's hasn't changed any numbers incorrectly:")
+sum(abs(check_frame$difference_between_value_and_corrected_value), na.rm=T)
+
+#finally create value_number to be our value corrected for censoring and make it numeric
+ar_labs_to_widen$value_number <- 
+  as.numeric(ar_labs_to_widen$number_corrected_for_comma)
+
+#we now have 'units' 'value' and value_limit' which is all of use, along with 'labs_hour', 'labs_minutes', 'labs_seconds' ' visit_date' 'labs_date', we should also keep the original text 'value' column along with the details of the centre etc
+
+print("Number without marker:")
+sum(is.na(ar_labs_to_widen$marker))
+```
+
+
+```{r, learn about units from this extraction}
+units_of_markers_that_centres_use <- 
+  ar_labs_to_widen[,c(
+    "labs_centre_name", 
+    "marker", 
+    "units")]
+
+units_of_markers_that_centres_use <- 
+  unique(subset(units_of_markers_that_centres_use, 
+                !is.na(units)))
+
+write.csv(units_of_markers_that_centres_use, 
+          "units_of_markers_that_centres_use_from_2021_extraction.csv")
+```
+
+
+```{r, tidy environemnt and remove frames we have done nothing with to prevent duplicated saving}
+
+rm(ar_participants_longitudinal_data)
+
+rm(ar_labs)
+
+rm(ar_labs_with_duplicated_rows)
+
+rm(ar_labs_duplications_completely_removed)
+
+rm(ar_labs_duplications_removed)
+
+rm(ar_labs_with_duplications_isolated_to_join_back)
+
+rm(check_frame)
+
+rm(ar_labs_with_baronio)
+```
+
+
+```{r, %% number of rows removed from the labs file}
+print("Number of rows in original frame")
+nrow(ar_labs_original)
+
+print("Number of rows in final frame before making it wide")
+nrow(ar_labs_to_widen)
+
+print("Number of rows removed automatically due to exact duplications:")
+number_of_exact_row_duplicates_removed + number_duplicated_with_different_assessment_id
+
+print("This means the following number of rows were removed due to manual adjustment:")
+nrow(ar_labs_original)-
+  nrow(ar_labs_to_widen) - 
+  (number_of_exact_row_duplicates_removed + number_duplicated_with_different_assessment_id)
+
+print("Number of rows removed in total:")
+```
+
+```{r, %% report number of values with censoring limit removed}
+print("This shows the number of variables with censoring removed:")
+freq(ar_labs_to_widen$value_limit )
+
+print("Number without marker:")
+sum(is.na(ar_labs_to_widen$marker))
+```
+
+```{r, %% number of assessment_dates changed}
+ar_labs_without_duplicated_rows$assessment_date_changed <-
+  ifelse(ar_labs_without_duplicated_rows$assessment_date !=
+  ar_labs_without_duplicated_rows$original_assessment_date |
+         is.na(ar_labs_without_duplicated_rows$assessment_date) &
+           !is.na(ar_labs_without_duplicated_rows$original_assessment_date) |
+         !is.na(ar_labs_without_duplicated_rows$assessment_date) &
+           is.na(ar_labs_without_duplicated_rows$original_assessment_date),
+         1,
+         0)
+
+print("Number of visits with manually corrected assessment_date")
+sum(ar_labs_without_duplicated_rows$assessment_date_changed, na.rm=T)
+
+print("Number of visits with missing assessment_date")
+sum(is.na(ar_labs_without_duplicated_rows$original_assessment_date), na.rm=T)
+
+print("Number of visits with assessment_date")
+sum(!is.na(ar_labs_without_duplicated_rows$assessment_date_changed), na.rm=T)
+
+print("Total number of rows in labs data without duplications")
+nrow(ar_labs_without_duplicated_rows)
+
+print("Number without marker:")
+sum(is.na(ar_labs_to_widen$marker))
+```
+
+```{r, %% number of date_and_time changed}
+ar_labs_without_duplicated_rows$date_and_time_changed <-
+  ifelse(ar_labs_without_duplicated_rows$date_and_time !=
+  ar_labs_without_duplicated_rows$original_date_and_time |
+         is.na(ar_labs_without_duplicated_rows$date_and_time) &
+           !is.na(ar_labs_without_duplicated_rows$original_date_and_time) |
+         !is.na(ar_labs_without_duplicated_rows$date_and_time) &
+           is.na(ar_labs_without_duplicated_rows$original_date_and_time),
+         1,
+         0)
+
+print("Number of visits with manually corrected date_and_time")
+sum(ar_labs_without_duplicated_rows$date_and_time_changed, na.rm=T)
+
+print("Number of visits with missing date_and_time")
+sum(is.na(ar_labs_without_duplicated_rows$original_date_and_time), na.rm=T)
+
+print("Number of visits with date_and_time")
+sum(!is.na(ar_labs_without_duplicated_rows$date_and_time_changed), na.rm=T)
+
+print("Total number of rows in labs data without duplications")
+nrow(ar_labs_without_duplicated_rows)
+
+print("Number without marker:")
+sum(is.na(ar_labs_to_widen$marker))
+```
+
+```{r, turn id_visit_date into a character before saving}
+ar_labs_to_widen$id_visit_date <- 
+  as.character(ar_labs_to_widen$id_visit_date)
+```
+
+```{r, separate out markers to be able to assess and manually correct for renin that should be plasma renin activity and vice versa}
+print("Number without marker:")
+sum(is.na(ar_labs_to_widen$marker))
+
+unique(ar_labs_to_widen$marker)
+
+ar_labs_to_widen_renin <-
+  subset(ar_labs_to_widen, marker=="renin")
+print("These are the units we have extracted from the registry for renin:")
+unique(ar_labs_to_widen_renin$units)
+
+ar_labs_to_widen_plasma_renin_activity <-
+  subset(ar_labs_to_widen, marker=="plasma_renin_activity")
+print("These are the units we have extracted from the registry for plasma renin activity:")
+unique(ar_labs_to_widen_plasma_renin_activity$units)
+
+ar_labs_to_widen_17OHP <-
+  subset(ar_labs_to_widen, marker=="ohp17")
+print("These are the units we have extracted from the registry for 17OHP:")
+unique(ar_labs_to_widen_17OHP$units)
+
+ar_labs_to_widen_androstenedione <-
+  subset(ar_labs_to_widen, marker=="andostenedione")
+print("These are the units we have extracted from the registry for Androstenedione:")
+unique(ar_labs_to_widen_androstenedione$units)
+
+ar_labs_to_widen_sodium <-
+  subset(ar_labs_to_widen, marker=="sodium")
+print("These are the units we have extracted from the registry for Sodium:")
+unique(ar_labs_to_widen_sodium$units)
+
+ar_labs_to_widen_potassium <-
+  subset(ar_labs_to_widen, marker=="potassium")
+print("These are the units we have extracted from the registry for Potassium:")
+unique(ar_labs_to_widen_potassium$units)
+
+
+```
+
+```{r, ensure markers are all continuous words}
+ar_labs_to_widen$marker <- 
+  ifelse(ar_labs_to_widen$marker=="lh after LHRH",
+         "lh_after_LHRH",
+         ar_labs_to_widen$marker)
+ar_labs_to_widen$marker <- 
+  ifelse(ar_labs_to_widen$marker=="fsh after LHRH",
+         "fsh_after_LHRH",
+         ar_labs_to_widen$marker)
+print("Check all these names are appropriately coded into single strings without spaces so we don't have problems when pivoting wider")
+unique(ar_labs_to_widen$marker)
+```
+
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_4")
+Sys.time()
+```
