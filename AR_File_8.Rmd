@@ -1,0 +1,2466 @@
+
+Load packages and reread files using the prebuilt load files function
+
+```{r, load packages}
+rm(list = ls())
+
+#we first establish the location of the working directory where we keep everything, depending on whether it exists (i.e. which computer we are using)
+#check C drive
+#take the working directory otherwise, which should work every time
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- getwd()
+}
+
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+#we load the ar_participants just to compare dates of visits
+load_ar_files_function(previous_file_name = "file_3",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_participants_longitudinal_data"))
+
+
+```
+
+
+before we load the medication data, we can pull out all the visit dates from the longitudinal data we have that we will use later to check against
+
+```{r, establish dates within longitudinal data and pull glucocorticoid notes to create a vector through which to check}
+#we also want to know if that assessment date is present for that patient in ar_participants_longitudinal_data
+ar_participants_longitudinal_visit_dates <-
+  ar_participants_longitudinal_data[,c(
+    "id",
+    "visit_date")]
+
+#rename those to tell us what frame it is coming from
+names(ar_participants_longitudinal_visit_dates)[names(
+  ar_participants_longitudinal_visit_dates)=="visit_date"] <- 
+  "longitudinal_visit_date"
+
+#we don't want to join those, we want to paste them together. then we can simply list the pasted id and longitudinal visit date, and get the other frame to check if the pasted id labs visit date is in that list
+longitudinal_id_visit_dates_vector_to_check <-
+  as.vector(paste0(ar_participants_longitudinal_visit_dates$id,
+                   "_",
+                   ar_participants_longitudinal_visit_dates$longitudinal_visit_date))
+#do a similar vector of just the ids of the patients that are in longitudinal data
+longitudinal_id_vector_to_check <-
+  as.vector(unique(ar_participants_longitudinal_visit_dates$id))
+
+#put that into a frame purely for purposes of loooking inside the console
+longitudinal_id_visit_dates_vector_to_check_frame <- 
+  as.data.frame(longitudinal_id_visit_dates_vector_to_check)
+
+```
+
+
+```{r, load medication data and pull out original versions of columns}
+ar_medication_1 <- 
+  read.csv("./2024-01-26_Data_extraction_adiposity_rebound/STUDY Meds CAH 25.1.24_1.csv", header=T, na.strings="NULL")
+ar_medication_2 <- 
+  read.csv("./2024-01-26_Data_extraction_adiposity_rebound/STUDY Meds CAH 25.1.24_2.csv", header=T, na.strings="NULL")
+
+print("we turn the record id into an integer ")
+ar_medication_1$record_id <- as.integer(ar_medication_1$record_id)
+
+any_duplication_between_frames_check_1 <-
+  subset(ar_medication_1, assessment_id %in% ar_medication_2$assessment_id)
+nrow(any_duplication_between_frames_check_1)
+any_duplication_between_frames_check_2 <-
+  subset(ar_medication_2, assessment_id %in% ar_medication_1$assessment_id)
+nrow(any_duplication_between_frames_check_2)
+
+fully_joined_ar_medication <-
+  full_join(ar_medication_1,
+             ar_medication_2,
+             by="id")
+print("Number of rows in tab 1 of the excel sheet")
+nrow(ar_medication_1)
+print("Number of rows in tab 2 of the excel sheet")
+nrow(ar_medication_2)
+print("Number of rows in the fully joined frame:")
+nrow(fully_joined_ar_medication)
+
+print("Number of rows in the duplications frame when we join by all possible columns:")
+ar_medication_joined <-
+  full_join(any_duplication_between_frames_check_1,
+             any_duplication_between_frames_check_2)
+nrow(ar_medication_joined)
+
+ar_medication <- ar_medication_original <- ar_medication_1
+#remove the frames that looked at both the excel tabs to avoid confusion
+
+rm(ar_medication_1)
+rm(ar_medication_2)
+rm(ar_medication_joined)
+
+#order the original frame and reprint it back into the working directory just for easy manual review
+ar_medication_original_ordered <- 
+  ar_medication_original[order(
+    ar_medication_original$record_id,
+    ar_medication_original$assessment_id),] 
+write.csv(ar_medication_original_ordered, "ar_medication_original_ordered.csv", row.names=F)
+
+#ar_medication$flag_for_removal <-
+  ifelse(is.na(ar_medication$record_id) &
+           ar_medication$medicine=="" &
+           is.na(ar_medication$dose),
+         1,
+         0)
+ar_medication_empty_na_rows <-
+  subset(ar_medication, flag_for_removal==1)
+print("Total number with completely empty rows:")
+nrow(ar_medication)
+print("Total number of empty rows removed:")
+nrow(ar_medication_empty_na_rows)
+#now remove those
+ar_medication <-
+  subset(ar_medication, flag_for_removal==0)
+print("Total number of rows remaining")
+nrow(ar_medication)
+
+print("number of rows in the medication frame")
+
+nrow(ar_medication)
+
+ar_medication$flag_for_removal <- NULL
+```
+
+
+```{r, create column names and missing data percentage files to refer to}
+column_names_and_missing_percentages_ar_medication_original <-
+  data.frame(
+    Column=colnames(ar_medication_original),
+    Percentage_complete=NA
+  )
+
+#create a loop to report the percentage complete
+for (i in 1:length(column_names_and_missing_percentages_ar_medication_original$Column)){
+  each_column <- column_names_and_missing_percentages_ar_medication_original[i,1]
+
+  column_names_and_missing_percentages_ar_medication_original[i,"Percentage_complete"] <- 
+    round(100*
+      sum(!is.na(ar_medication_original[,c(each_column)])) / 
+      length(ar_medication_original[,c(each_column)]), digits=1)
+}
+
+dir.create("column_names_and_missing_percentages")
+write.csv(column_names_and_missing_percentages_ar_medication_original, 
+          "./column_names_and_missing_percentages/colnames_and_missing_percentage_ar_medication_original.csv", 
+          row.names=F)
+```
+
+```{r, remove the row id column from the medication frame}
+#so that our extra rows can be added without problems
+ar_medication$id <- NULL
+```
+
+```{r, pull out original versions of columns}
+#create original columns because we manually adjust the values of dates within this file. This original will then allow us to add a flag right at the end
+ar_medication$original_assessment_date <-
+  ar_medication$assessment_date
+
+ar_medication$original_time <-
+  ar_medication$time
+
+ar_medication$original_medicine <-
+  ar_medication$medicine
+
+ar_medication$original_unit <-
+  ar_medication$unit
+
+ar_medication$original_dose <-
+  ar_medication$dose
+
+#add a flag for removal line here that can be used to filter and replace with a flag if necessary
+ar_medication$flag_for_removal <- 0
+```
+
+```{r, confirm assessment date and assessment_id are always on the same date}
+#paste assessment date and assessment id together
+ar_medication$assessment_date_check <- 
+  paste0(ar_medication$assessment_id, 
+         "_",
+         as.POSIXct(ar_medication$assessment_date, 
+                    format="%d/%m/%Y"))
+
+print("number of different assessment id's should be same as number of different assessment dates, therefore this number should be zero:")
+
+#count the number of the pasted assessment date and id and compare to number of assessment id's alone
+length(unique(ar_medication$assessment_date_check)) - length(unique(ar_medication$assessment_id))
+```
+
+
+```{r, create review frame of all patients that have an NA for medicine}
+#pull out all the NAs for medicine
+ar_medication_with_na_for_medicine <- 
+  subset(ar_medication, is.na(medicine))
+
+#extend that subset to all entries from patients that have an NA
+ar_medication_with_na_for_medicine <- 
+  subset(ar_medication, record_id %in% ar_medication_with_na_for_medicine$record_id)
+
+ar_medication_with_na_for_medicine <- 
+  ar_medication_with_na_for_medicine[order(ar_medication_with_na_for_medicine$record_id,
+                                           ar_medication_with_na_for_medicine$assessment_id),] 
+```
+
+
+```{r, show what is contained within the medicine column, and look at entries marked as other}
+#frequencies_of_medicines_before_changes
+
+medicine_as_other <- 
+  subset(ar_medication, medicine=="other")
+
+freq(ar_medication$medicine)
+```
+
+```{r, show all possible unit values, and review all patients that have mcg for unit}
+freq(ar_medication$unit)
+
+#pull out all the mcg for unit
+
+ar_medication_with_mcg_for_unit <- 
+  subset(ar_medication, 
+         unit=="mcg")
+
+#extend that subset to all entries from patients that have an mcg entry
+
+ar_medication_with_mcg_for_unit <- 
+  subset(ar_medication, record_id %in% ar_medication_with_mcg_for_unit$record_id)
+
+ar_medication_with_mcg_for_unit <- 
+  ar_medication_with_mcg_for_unit[order(ar_medication_with_mcg_for_unit$record_id,
+                                           ar_medication_with_mcg_for_unit$assessment_id),] 
+
+print("Assess the frame ar_medication_with_mcg_for_unit - this will establish if anything is registered as mcg such as hydrocortisone that shouldnt be and needs clarification")
+write.csv(ar_medication_with_mcg_for_unit, "ar_medication_with_mcg_for_unit.csv")
+```
+
+```{r, review all patients that have an NA for unit}
+#pull out all the NAs for unit
+
+ar_medication_with_na_for_unit <- 
+  subset(ar_medication, 
+         is.na(unit))
+
+#extend that subset to all entries from patients that have an NA
+
+ar_medication_with_na_for_unit <- 
+  subset(ar_medication, record_id %in% ar_medication_with_na_for_unit$record_id)
+
+ar_medication_with_na_for_unit <- 
+  ar_medication_with_na_for_unit[order(ar_medication_with_na_for_unit$record_id,
+                                           ar_medication_with_na_for_unit$assessment_id),] 
+
+write.csv(ar_medication_with_na_for_unit, "ar_medication_with_na_for_unit.csv")
+```
+
+
+```{r, review all patients that have a high dose with arbitrarily defined thresholds}
+#define our thresholds
+hydrocortisone_threshold <- 20
+prednisolone_threshold <- 5
+dexamethasone_threshold <- 0.5
+
+#pull out all the high doses separately
+ar_medication_with_high_hydrocortisone <- 
+  subset(ar_medication, 
+         dose>hydrocortisone_threshold &
+         medicine=="hydrocortisone")
+
+#extend that subset to all entries from patients that have an NA
+ar_medication_with_high_hydrocortisone <- 
+  subset(ar_medication, record_id %in% ar_medication_with_high_hydrocortisone$record_id)
+
+ar_medication_with_high_hydrocortisone <- 
+  ar_medication_with_high_hydrocortisone[order(ar_medication_with_high_hydrocortisone$record_id,
+                                           ar_medication_with_high_hydrocortisone$assessment_id),] 
+
+#pull out all the high doses separately
+ar_medication_with_high_prednisolone <- 
+  subset(ar_medication, 
+         dose>prednisolone_threshold &
+         medicine=="prednisolone")
+
+#extend that subset to all entries from patients that have an NA
+ar_medication_with_high_prednisolone <- 
+  subset(ar_medication, record_id %in% ar_medication_with_high_prednisolone$record_id)
+
+ar_medication_with_high_prednisolone <- 
+  ar_medication_with_high_prednisolone[order(ar_medication_with_high_prednisolone$record_id,
+                                           ar_medication_with_high_prednisolone$assessment_id),] 
+
+#pull out all the high doses separately
+ar_medication_with_high_dexamethasone <- 
+  subset(ar_medication, 
+         dose>dexamethasone_threshold &
+         medicine=="dexamethasone")
+
+#extend that subset to all entries from patients that have an NA
+ar_medication_with_high_dexamethasone <- 
+  subset(ar_medication, record_id %in% ar_medication_with_high_dexamethasone$record_id)
+
+ar_medication_with_high_dexamethasone <- 
+  ar_medication_with_high_dexamethasone[order(ar_medication_with_high_dexamethasone$record_id,
+                                           ar_medication_with_high_dexamethasone$assessment_id),] 
+```
+
+```{r, review all patients that have an entry of 0.00 for dose}
+#pull out all the zeros for dose
+ar_medication_with_zero_for_dose <- 
+  subset(ar_medication, 
+         dose==0)
+#extend that subset to all entries from patients that have an NA
+ar_medication_with_zero_for_dose <- 
+  subset(ar_medication, record_id %in% ar_medication_with_zero_for_dose$record_id)
+
+ar_medication_with_zero_for_dose <- 
+  ar_medication_with_zero_for_dose[order(ar_medication_with_zero_for_dose$record_id,
+                                           ar_medication_with_zero_for_dose$assessment_id),] 
+
+```
+
+
+```{r, lag columns to diagnose differences reverse chronology of assessment_date within record_id}
+#now we have one reading per assessment id, we can order by id, ready to lag the frame
+ar_medication <- 
+  ar_medication[order(ar_medication$record_id,
+                           ar_medication$assessment_id),] 
+
+#lag the record_id
+ar_medication$lag_record_id <- 
+  lag(ar_medication$record_id)
+
+#lag the assessment_id
+ar_medication$lag_assessment_id <- 
+  lag(ar_medication$assessment_id)
+
+#make a posix visit date
+ar_medication$medication_visit_date <- 
+  as.POSIXct(ar_medication$assessment_date, format="%d/%m/%Y")
+
+#we also want an id and medication_visit_date paste to check against a list of longitudinal visit dates pasted to the ids
+ar_medication$id_medication_visit_date_check <- 
+  paste0(ar_medication$record_id, 
+         "_",
+         ar_medication$medication_visit_date)
+
+#lag the visit date
+ar_medication$lag_medication_visit_date <- 
+  lag(ar_medication$medication_visit_date)
+
+#flag if the previous visit date is afterwards in time than the current visit date
+ar_medication$same_patient_back_in_time <-
+  ifelse(ar_medication$record_id==ar_medication$lag_record_id &
+           as.numeric(difftime(ar_medication$lag_medication_visit_date, 
+                    ar_medication$medication_visit_date, units="days")) > 0,
+         1,
+         0)
+
+print("Number of rows with missing time:")
+nrow(subset(ar_medication , is.na(time)))
+
+print("Number of rows with time recorded as zero:")
+nrow(subset(ar_medication , time==0))
+
+print("Number of rows with time recorded as more than zero:")
+nrow(subset(ar_medication , time>0))
+
+patients_with_back_in_time_entries <- 
+  unique(subset(ar_medication, same_patient_back_in_time==1)$record_id)
+
+medication_data_with_back_in_time_entries <-
+  subset(ar_medication, record_id %in% patients_with_back_in_time_entries)
+```
+
+```{r, check that visits are present in longitudinal data}
+ar_medication$id_paste_assessment_date <-
+  paste0(ar_medication$record_id, 
+         "_",
+         as.POSIXct(ar_medication$assessment_date , format="%d/%m/%Y"))
+
+#check if the visit date for each id is in the longitudinal data
+ar_medication$id_assessment_date_in_longitudinal_data <-
+  ifelse(
+    ar_medication$id_paste_assessment_date %in% longitudinal_id_visit_dates_vector_to_check,
+    1,
+    0
+  )
+
+#check if the id is in the longitudinal data
+ar_medication$id_in_longitudinal_data <-
+  ifelse(
+    ar_medication$record_id %in% longitudinal_id_vector_to_check,
+    1,
+    0
+  )
+
+#check if the id is in the longitudinal data, but the id_assessment_date is not
+ar_medication$id_in_longitudinal_data_but_visit_date_is_not <-
+  ifelse(ar_medication$id_in_longitudinal_data == 1 &
+         ar_medication$id_assessment_date_in_longitudinal_data == 0,
+         1,
+         0)
+```
+
+```{r, check for zero entries, which indicate mistaken data entry and can be removed}
+ar_medication$dose <- 
+  ifelse(ar_medication$dose==0, 
+         NA, 
+         ar_medication$dose)
+
+
+ar_medication$no_dose_no_preparation <-
+  ifelse(is.na(ar_medication$dose) &
+           is.na(ar_medication$medicine),
+         1,
+         0)
+
+ar_medication <- 
+  subset(ar_medication,
+         no_dose_no_preparation==0)
+
+```
+
+*********************
+preparation to spread data wide
+********************
+
+```{r, create assessment_date posix}
+ar_medication$assessment_date_posix <- 
+  as.POSIXct(ar_medication$assessment_date, format="%d/%m/%Y")
+
+print("note is always empty, so get rid of it")
+freq(ar_medication$note)
+ar_medication$note <- NULL
+```
+
+```{r, order by assessment time and id and correct multiples of dexamethasone that are incorrect by factor of 1000}
+ar_medication <- 
+  ar_medication[order(
+    ar_medication$assessment_id,
+    ar_medication$time),]
+
+freq(ar_medication$unit)
+units_mcg <- 
+  subset(ar_medication, unit=="mcg")
+
+units_mcg$dose
+
+
+ar_medication$dose <-
+  ifelse(ar_medication$unit=="mcg" &
+         ar_medication$medicine=="dexamethasone",
+         as.numeric(ar_medication$dose) / 1000 ,
+         as.numeric(ar_medication$dose))
+
+#remember, we need to correct the dose if the preparation is unknown, otherwise it will go to NA
+ar_medication$dose <-
+  ifelse(is.na(ar_medication$medicine),
+         as.numeric(ar_medication$dose),
+         as.numeric(ar_medication$dose))
+
+```
+
+```{r, order by assessment time and id}
+print("these are what I have changed the entries for dose that had units as mcg:")
+units_mcg <- 
+  subset(ar_medication, 
+         unit=="mcg")
+units_mcg$dose
+
+ar_medication$unit <-
+  ifelse(ar_medication$unit=="mcg",
+         "mg",
+         ar_medication$unit)
+
+```
+
+```{r, check units for dexamethasone}
+dexamethasone_entries <- 
+  subset(ar_medication, medicine=="dexamethasone")
+
+
+max(dexamethasone_entries$dose, na.rm=T)
+
+
+max(dexamethasone_entries$dose, na.rm=T)
+```
+
+```{r, print the manually adjusted frame}
+ar_medication_adjusted_ordered <- 
+  ar_medication[,c("record_id",
+                   "assessment_id",
+                   "assessment_date_posix",
+                   "time",
+                   "dose",
+                   "medicine",
+                   "unit")]
+
+ar_medication_adjusted_ordered <- 
+  ar_medication_adjusted_ordered[order(ar_medication_adjusted_ordered$record_id,
+    ar_medication_adjusted_ordered$assessment_id,
+    ar_medication_adjusted_ordered$time),] 
+
+write.csv(ar_medication_adjusted_ordered, "ar_medication_adjusted_ordered.csv", row.names=F)
+```
+
+replace this chunk to render plots
+```{r, plot of visit dates and medication dates to diagnose medication dates not present in longitudinal data}
+
+#note here you can change this to original_assessment_date and original_date_and_time to get what happened before the changes
+all_original_data_to_plot <-
+  rownames_to_column(
+    ar_medication_original[,c(
+      "record_id",
+      "assessment_id",
+      "medicine",
+      "dose",
+      "assessment_date")])
+
+#account for missing data to colour by by calling it 'missing'
+all_original_data_to_plot$medicine <-
+  ifelse(is.na(all_original_data_to_plot$medicine),
+         "missing",
+         all_original_data_to_plot$medicine )
+
+#note here you can change this to original_assessment_date and original_date_and_time to get what happened before the changes
+all_adjusted_data_to_plot <-
+  rownames_to_column(
+    ar_medication[,c(
+      "id_in_longitudinal_data_but_visit_date_is_not",
+      "record_id",
+      "assessment_id",
+      "medicine",
+      "dose",
+      "assessment_date_posix")])
+
+#account for missing data to colour by by calling it 'missing'
+all_adjusted_data_to_plot$medicine <-
+  ifelse(is.na(all_adjusted_data_to_plot$medicine),
+         "missing",
+         all_adjusted_data_to_plot$medicine )
+
+#make the data types approrpiate
+all_adjusted_data_to_plot$rowname <- 
+  as.numeric(all_adjusted_data_to_plot$rowname)
+all_original_data_to_plot$rowname <- 
+  as.numeric(all_original_data_to_plot$rowname)
+
+all_adjusted_data_to_plot$dose <- 
+  as.numeric(all_adjusted_data_to_plot$dose)
+all_original_data_to_plot$dose <- 
+  as.numeric(all_original_data_to_plot$dose)
+
+all_adjusted_data_to_plot$assessment_date_posix <- 
+  as.POSIXct(all_adjusted_data_to_plot$assessment_date_posix, format="%d/%m/%Y")
+all_original_data_to_plot$assessment_date_posix <- 
+  as.POSIXct(all_original_data_to_plot$assessment_date, format="%d/%m/%Y")
+
+#make a ggplot
+for(id_to_plot in unique(ar_medication$record_id)){
+print(paste0("Rendering id: ", id_to_plot))
+#use a test id when refining:
+#  id_to_plot <- 276
+
+adjusted_data_to_plot <-
+  subset(all_adjusted_data_to_plot, record_id==id_to_plot)
+original_data_to_plot <-
+  subset(all_original_data_to_plot, record_id==id_to_plot)
+
+patient_has_a_medication_visit_not_in_longitudinal_data <-
+  ifelse(sum(adjusted_data_to_plot$id_in_longitudinal_data_but_visit_date_is_not) > 0,
+         1,
+         0)
+  
+#render a plot with original data
+original_plot <- 
+  ggplot(data=original_data_to_plot,
+       aes(x=assessment_date_posix, y=dose)) +
+  geom_vline(
+    data=subset(ar_participants_longitudinal_visit_dates, id==id_to_plot),
+    aes(xintercept=longitudinal_visit_date), 
+    colour="green", 
+    linewidth=2,
+    alpha=0.5) +
+  geom_vline(
+    data=subset(original_data_to_plot),
+    aes(xintercept=assessment_date_posix), 
+    colour="blue", 
+    alpha=0.5) +
+#  geom_line(aes(group=rowname)) +
+  geom_text(aes(label=assessment_id, y=1.5), angle=90, vjust=0) +
+  geom_point(aes(colour=medicine,
+                 size=dose),
+             alpha=0.5) +
+  labs(title=paste0("Medication data original: Patient ID = ", id_to_plot),
+       subtitle="Thick green line has a longitudinal date, therefore thin blue line on its own is just medication data") +
+  themewithlegend
+#original_plot  
+
+#render a plot with adjusted data
+adjusted_plot <- 
+  ggplot(data=adjusted_data_to_plot,
+       aes(x=assessment_date_posix, y=dose)) +
+  geom_vline(
+    data=subset(ar_participants_longitudinal_visit_dates, id==id_to_plot),
+    aes(xintercept=longitudinal_visit_date), 
+    colour="green", 
+    linewidth=2,
+    alpha=0.5) +
+  geom_vline(
+    data=subset(adjusted_data_to_plot),
+    aes(xintercept=assessment_date_posix), 
+    colour="blue", 
+    alpha=0.5) +
+#  geom_line(aes(group=rowname)) +
+  geom_text(aes(label=assessment_id, y=1.5), angle=90, vjust=0) +
+  geom_point(aes(colour=medicine,
+                 size=dose),
+             alpha=0.5) +
+  labs(title=paste0("Medication data adjusted: Patient ID = ", id_to_plot),
+       subtitle="Thick green line has a longitudinal date, therefore thin blue line on its own is just medication data") +
+  themewithlegend
+#adjusted_plot
+
+#create folders to put plots
+dir.create("medication_date_plots")
+dir.create("medication_date_plots/with_all_visits_in_longitudinal")
+dir.create("medication_date_plots/with_a_visit_not_in_longitudinal")
+dir.create("medication_date_plots/with_all_visits_in_longitudinal/adjusted")
+dir.create("medication_date_plots/with_a_visit_not_in_longitudinal/adjusted")
+dir.create("medication_date_plots/with_all_visits_in_longitudinal/original")
+dir.create("medication_date_plots/with_a_visit_not_in_longitudinal/original")
+dir.create("medication_date_plots/with_all_visits_in_longitudinal/comparison")
+dir.create("medication_date_plots/with_a_visit_not_in_longitudinal/comparison")
+
+#save it in separate folders depending on whether there are visits present not in longitudinal
+if (patient_has_a_medication_visit_not_in_longitudinal_data==0){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_date_plots/with_all_visits_in_longitudinal/adjusted", 
+       plot = adjusted_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+if (patient_has_a_medication_visit_not_in_longitudinal_data==1){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_date_plots/with_a_visit_not_in_longitudinal/adjusted", 
+       plot = adjusted_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+#save it in separate folders depending on whether there are visits present not in longitudinal
+if (patient_has_a_medication_visit_not_in_longitudinal_data==0){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_date_plots/with_all_visits_in_longitudinal/original", 
+       plot = original_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+if (patient_has_a_medication_visit_not_in_longitudinal_data==1){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_date_plots/with_a_visit_not_in_longitudinal/original", 
+       plot = original_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+#make a grid_plot
+grid_plot <-
+  grid.arrange(adjusted_plot, 
+               original_plot, 
+               ncol=1)
+
+if (patient_has_a_medication_visit_not_in_longitudinal_data==0){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_date_plots/with_all_visits_in_longitudinal/comparison", 
+       plot = grid_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, #
+       compression = "lzw", 
+       limitsize=F)
+}
+if (patient_has_a_medication_visit_not_in_longitudinal_data==1){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_date_plots/with_a_visit_not_in_longitudinal/comparison", 
+       plot = grid_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, #
+       compression = "lzw", 
+       limitsize=F)
+}
+
+}
+sink("medication_date_plots/a_instructions_to_review_medication_date_plots.txt")
+
+print("These plots are all individual patients. Look at the plots in the folder medication_date_plots/with_a_visit_not_in_longitudinal_data for thin blue lines that are significantly outside of the range of the thick green lines. The thin blue lines are the visits without longitudinal data. If they are a long way from the longitudinal visits that have thick green lines, this indicates there may have been a data entry error for the date of the medication. The black points indicate the dose the patients on. If this dose changes significantly over a thin blue line, then this visit also warrants manual review. Also look for blue lines that clearly have two assessment_ids overlaid")
+
+sink()
+
+```
+
+```{r, plot of number of rows of data for medication within a single assessment id to look for peaks or troughs that indicate multiple data entry or partial data entry}
+
+#note here you can change this to original_assessment_date and original_date_and_time to get what happened before the changes
+all_original_data_to_plot <-
+  rownames_to_column(
+    ar_medication_original[,c(
+      "record_id",
+      "assessment_id",
+      "medicine",
+      "dose",
+      "assessment_date")])
+
+#account for missing data to colour by by calling it 'missing'
+all_original_data_to_plot$medicine <-
+  ifelse(is.na(all_original_data_to_plot$medicine),
+         "missing",
+         all_original_data_to_plot$medicine )
+
+#note here you can change this to original_assessment_date and original_date_and_time to get what happened before the changes
+all_adjusted_data_to_plot <-
+  rownames_to_column(
+    ar_medication[,c(
+      "id_in_longitudinal_data_but_visit_date_is_not",
+      "record_id",
+      "assessment_id",
+      "medicine",
+      "dose",
+      "assessment_date_posix")])
+
+all_adjusted_data_to_plot$medicine <-
+  ifelse(is.na(all_adjusted_data_to_plot$medicine),
+         "missing",
+         all_adjusted_data_to_plot$medicine )
+
+#sequence down each assessment_id to find the number of entries for that assessment_id
+all_adjusted_data_to_plot$assessment_id_sequence <-
+  ave(all_adjusted_data_to_plot$record_id, 
+      all_adjusted_data_to_plot$assessment_id, 
+      FUN = seq_along)
+
+#take the mximum of the sequence column
+all_adjusted_data_to_plot <-
+  all_adjusted_data_to_plot %>% 
+  group_by(assessment_id) %>%
+  slice_max(assessment_id_sequence, 
+            n=1,
+            with_ties = F)
+
+#sequence down each assessment_id to find the number of entries for that assessment_id
+all_original_data_to_plot$assessment_id_sequence <-
+  ave(all_original_data_to_plot$record_id, 
+      all_original_data_to_plot$assessment_id, 
+      FUN = seq_along)
+
+#take the mximum of the sequence column
+all_original_data_to_plot <-
+  all_original_data_to_plot %>% 
+  group_by(assessment_id) %>%
+  slice_max(assessment_id_sequence, 
+            n=1,
+            with_ties = F)
+
+#make the data types approrpiate
+all_adjusted_data_to_plot$rowname <- 
+  as.numeric(all_adjusted_data_to_plot$rowname)
+all_original_data_to_plot$rowname <- 
+  as.numeric(all_original_data_to_plot$rowname)
+
+all_adjusted_data_to_plot$dose <- 
+  as.numeric(all_adjusted_data_to_plot$dose)
+all_original_data_to_plot$dose <- 
+  as.numeric(all_original_data_to_plot$dose)
+
+all_adjusted_data_to_plot$assessment_date_posix <- 
+  as.POSIXct(all_adjusted_data_to_plot$assessment_date_posix, format="%d/%m/%Y")
+all_original_data_to_plot$assessment_date_posix <- 
+  as.POSIXct(all_original_data_to_plot$assessment_date, format="%d/%m/%Y")
+
+#now I want to plot the assessment date against the assessment_id_sequence
+
+#make a ggplot
+for(id_to_plot in unique(ar_medication$record_id)){
+print(paste0("Rendering id: ", id_to_plot))
+#use a test id when refining:
+#  id_to_plot <- 276
+
+adjusted_data_to_plot <-
+  subset(all_adjusted_data_to_plot, record_id==id_to_plot)
+original_data_to_plot <-
+  subset(all_original_data_to_plot, record_id==id_to_plot)
+
+patient_has_a_change_in_number_of_medication_entries_within_assessment_ids <-
+  ifelse(min(adjusted_data_to_plot$assessment_id_sequence) != max(adjusted_data_to_plot$assessment_id_sequence),
+         1,
+         0)
+
+#render a plot with original data
+original_plot <- 
+  ggplot(data=original_data_to_plot,
+       aes(x=assessment_date_posix, y=assessment_id_sequence)) +
+  geom_vline(
+    data=subset(ar_participants_longitudinal_visit_dates, id==id_to_plot),
+    aes(xintercept=longitudinal_visit_date), 
+    colour="green", 
+    linewidth=2,
+    alpha=0.5) +
+  geom_vline(
+    data=subset(original_data_to_plot),
+    aes(xintercept=assessment_date_posix), 
+    colour="blue", 
+    alpha=0.5) +
+  geom_text(aes(label=assessment_id, y=1.5), angle=90, vjust=0) +
+  geom_point(aes(colour=medicine,
+                 size=dose),
+             alpha=0.5) +
+  geom_line(aes()) +
+  coord_cartesian(ylim=c(0,4)) +
+  labs(title=paste0("Medication data original: Patient ID = ", id_to_plot),
+       subtitle="Thick green line has a longitudinal date, therefore thin blue line on its own is just medication data") +
+  themewithlegend
+original_plot  
+
+#render a plot with adjusted data
+adjusted_plot <- 
+  ggplot(data=adjusted_data_to_plot,
+       aes(x=assessment_date_posix, y=assessment_id_sequence)) +
+  geom_vline(
+    data=subset(ar_participants_longitudinal_visit_dates, id==id_to_plot),
+    aes(xintercept=longitudinal_visit_date), 
+    colour="green", 
+    linewidth=2,
+    alpha=0.5) +
+  geom_vline(
+    data=subset(adjusted_data_to_plot),
+    aes(xintercept=assessment_date_posix), 
+    colour="blue", 
+    alpha=0.5) +
+  geom_line(aes()) +
+  geom_text(aes(label=assessment_id, y=1.5), angle=90, vjust=0) +
+  geom_point(aes(colour=medicine,
+                 size=dose),
+             alpha=0.5) +
+  coord_cartesian(ylim=c(0,4)) +
+  labs(title=paste0("Medication data adjusted: Patient ID = ", id_to_plot),
+       subtitle="Thick green line has a longitudinal date, therefore thin blue line on its own is just medication data") +
+  themewithlegend
+adjusted_plot
+
+#create folders to put plots
+dir.create("medication_entry_plots/with_a_change_in_number_of_entries/adjusted")
+dir.create("medication_entry_plots/without_a_change_in_number_of_entries/adjusted")
+dir.create("medication_entry_plots/with_a_change_in_number_of_entries/original")
+dir.create("medication_entry_plots/without_a_change_in_number_of_entries/original")
+dir.create("medication_entry_plots/with_a_change_in_number_of_entries/comparison")
+dir.create("medication_entry_plots/without_a_change_in_number_of_entries/comparison")
+
+#save it in separate folders depending on whether there are visits present not in longitudinal
+if (patient_has_a_change_in_number_of_medication_entries_within_assessment_ids==0){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_entry_plots/without_a_change_in_number_of_entries/adjusted", 
+       plot = adjusted_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+if (patient_has_a_change_in_number_of_medication_entries_within_assessment_ids==1){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_entry_plots/with_a_change_in_number_of_entries/adjusted", 
+       plot = adjusted_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+#save it in separate folders depending on whether there are visits present not in longitudinal
+if (patient_has_a_change_in_number_of_medication_entries_within_assessment_ids==0){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_entry_plots/without_a_change_in_number_of_entries/original", 
+       plot = original_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+if (patient_has_a_change_in_number_of_medication_entries_within_assessment_ids==1){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_entry_plots/with_a_change_in_number_of_entries/original", 
+       plot = original_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+#make a grid_plot
+grid_plot <-
+  grid.arrange(adjusted_plot, 
+               original_plot, 
+               ncol=1)
+
+if (patient_has_a_change_in_number_of_medication_entries_within_assessment_ids==0){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_entry_plots/without_a_change_in_number_of_entries/comparison", 
+       plot = grid_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, #
+       compression = "lzw", 
+       limitsize=F)
+}
+if (patient_has_a_change_in_number_of_medication_entries_within_assessment_ids==1){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./medication_entry_plots/with_a_change_in_number_of_entries/comparison", 
+       plot = grid_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, #
+       compression = "lzw", 
+       limitsize=F)
+}
+
+}
+
+sink("medication_entry_plots/a_instructions_to_review_medication_entry_plots.txt")
+
+print("Look through medication_entry_plots/with_a_change_in_number_of_entries. These plots are all individual patients. They show the number of rows of medications entered for each assessment_id. The idea being that any spike or trough in the number of rows entered may indicate partial entry and should be reviewed")
+
+sink()
+
+```
+
+```{r, check assessment dates, note this is a duplication as done above by different methodology}
+medication_date_check <- 
+  ar_medication %>% 
+  group_by(assessment_id) %>% 
+  dplyr::summarise(
+    min_date = min(assessment_date_posix),
+    max_date = max(assessment_date_posix)
+)
+
+medication_date_check$difference <- 
+  medication_date_check$max_date - 
+  medication_date_check$min_date
+
+print("this checks the difference between dates recorded in the same assessment ID - the min and max should be zero to say that all the dates within the same assessments are the same:")
+
+print("minimum is:")
+min(as.numeric(medication_date_check$difference))
+
+print("maximum is:")
+max(as.numeric(medication_date_check$difference))
+```
+
+```{r, establish time of administration}
+#correct for zero entries which should be NA, and make the number of seconds in this column a number
+ar_medication$time <- 
+  ifelse(ar_medication$time!=0 , 
+         as.numeric(ar_medication$time), 
+         NA)
+
+ar_medication$meds_time <- 
+  ar_medication$time
+
+#create meds_clock_time of medication
+ar_medication$meds_clock_time <-
+  seconds_to_period(ar_medication$time)
+
+ar_medication$meds_clock_time <-
+  sprintf('%02d:%02d:%02d', 
+          ar_medication$meds_clock_time@hour, 
+          minute(ar_medication$meds_clock_time), 
+          second(ar_medication$meds_clock_time))
+
+ar_medication$meds_clock_time <-
+  ifelse(ar_medication$meds_clock_time=="NA:NA:NA",
+         NA,
+         ar_medication$meds_clock_time)
+
+dir.create("ICAH_ar_text_file_outputs")
+
+sink("./ICAH_ar_text_file_outputs/ar_medication_times.txt")
+
+freq(ar_medication$meds_clock_time)
+
+sink()
+
+print("Percentage with time of dose administration missing:")
+subset(rownames_to_column(as.data.frame(freq(ar_medication$meds_clock_time))), 
+         rowname=="<NA>")$`% Total`
+```
+
+```{r, sort out id and centre name and sequence along assessments}
+#rename record_id and centreName
+ar_medication$id <- 
+  ar_medication$record_id
+
+ar_medication$meds_centre_name <- 
+  ar_medication$centreName
+
+ar_meds_centre_name_to_join_back <-
+  unique(ar_medication[,c(
+    "id", 
+    "meds_centre_name")])
+  
+ar_medication$assessment_entry <- 
+  ave(ar_medication$id, 
+      ar_medication$assessment_id,  
+      FUN = seq_along)
+
+```
+
+******************************************************************************************
+Making the frame wide
+******************************************************************************************
+
+```{r, separate each progressive asssessment administration to make into a wide frame}
+ar_medication_1st_entry <- 
+  ar_medication %>% 
+  filter(assessment_entry==1)
+
+ar_medication_2nd_entry <- 
+  ar_medication %>% 
+  filter(assessment_entry==2)
+
+ar_medication_3rd_entry <- 
+  ar_medication %>% 
+  filter(assessment_entry==3)
+
+ar_medication_4th_entry <- 
+  ar_medication %>% 
+  filter(assessment_entry==4)
+
+ar_medication_5th_entry <- 
+  ar_medication %>% 
+  filter(assessment_entry==5)
+
+ar_medication_6th_entry <- 
+  ar_medication %>% 
+  filter(assessment_entry==6)
+
+#now we can get rid of the 
+ar_medication$assessment_entry <- NULL
+
+ar_medication_1st_entry$assessment_entry <- NULL
+
+ar_medication_2nd_entry$assessment_entry <- NULL
+
+ar_medication_3rd_entry$assessment_entry <- NULL
+
+ar_medication_4th_entry$assessment_entry <- NULL
+
+ar_medication_5th_entry$assessment_entry <- NULL
+
+ar_medication_6th_entry$assessment_entry <- NULL
+
+#then add the appropriate suffix to each column in these frames to make them different before joining
+colnames(ar_medication_1st_entry) <- 
+  paste(colnames(ar_medication_1st_entry),
+        1,
+        sep="_")
+
+colnames(ar_medication_2nd_entry) <- 
+  paste(colnames(ar_medication_2nd_entry),
+        2,
+        sep="_")
+
+colnames(ar_medication_3rd_entry) <- 
+  paste(colnames(ar_medication_3rd_entry),
+        3,
+        sep="_")
+
+colnames(ar_medication_4th_entry) <- 
+  paste(colnames(ar_medication_4th_entry),
+        4,
+        sep="_")
+
+colnames(ar_medication_5th_entry) <- 
+  paste(colnames(ar_medication_5th_entry),
+        5,
+        sep="_")
+
+colnames(ar_medication_6th_entry) <- 
+  paste(colnames(ar_medication_6th_entry),
+        6,
+        sep="_")
+
+names(ar_medication_1st_entry)[names(ar_medication_1st_entry)=="id_1"] <- "id"
+names(ar_medication_1st_entry)[names(ar_medication_1st_entry)=="assessment_id_1"] <- 
+  "assessment_id"
+names(ar_medication_1st_entry)[names(ar_medication_1st_entry)=="assessment_date_posix_1"] <- 
+  "meds_assessment_date"
+
+names(ar_medication_2nd_entry)[names(ar_medication_2nd_entry)=="id_2"] <- "id"
+names(ar_medication_2nd_entry)[names(ar_medication_2nd_entry)=="assessment_id_2"] <- 
+  "assessment_id"
+names(ar_medication_2nd_entry)[names(ar_medication_2nd_entry)=="assessment_date_posix_2"] <- 
+  "meds_assessment_date"
+
+names(ar_medication_3rd_entry)[names(ar_medication_3rd_entry)=="id_3"] <- "id"
+names(ar_medication_3rd_entry)[names(ar_medication_3rd_entry)=="assessment_id_3"] <- 
+  "assessment_id"
+names(ar_medication_3rd_entry)[names(ar_medication_3rd_entry)=="assessment_date_posix_3"] <- 
+  "meds_assessment_date"
+
+names(ar_medication_4th_entry)[names(ar_medication_4th_entry)=="id_4"] <- "id"
+names(ar_medication_4th_entry)[names(ar_medication_4th_entry)=="assessment_id_4"] <- 
+  "assessment_id"
+names(ar_medication_4th_entry)[names(ar_medication_4th_entry)=="assessment_date_posix_4"] <- 
+  "meds_assessment_date"
+
+names(ar_medication_5th_entry)[names(ar_medication_5th_entry)=="id_5"] <- "id"
+names(ar_medication_5th_entry)[names(ar_medication_5th_entry)=="assessment_id_5"] <-
+  "assessment_id"
+names(ar_medication_5th_entry)[names(ar_medication_5th_entry)=="assessment_date_posix_5"] <- 
+  "meds_assessment_date"
+
+names(ar_medication_6th_entry)[names(ar_medication_6th_entry)=="id_6"] <- "id"
+names(ar_medication_6th_entry)[names(ar_medication_6th_entry)=="assessment_id_6"] <- 
+  "assessment_id"
+names(ar_medication_6th_entry)[names(ar_medication_6th_entry)=="assessment_date_posix_6"] <- 
+  "meds_assessment_date"
+```
+
+now we can join those together
+
+```{r, join together to make the wide frame ar_meds_wide}
+ar_meds_wide <- 
+  dplyr::left_join(ar_medication_1st_entry, 
+                   ar_medication_2nd_entry, 
+                   by=c("id", 
+                        "assessment_id", 
+                        "meds_assessment_date"))
+
+ar_meds_wide <- 
+  dplyr::left_join(ar_meds_wide, 
+                   ar_medication_3rd_entry, 
+                   by=c("id", 
+                        "assessment_id", 
+                        "meds_assessment_date"))
+
+ar_meds_wide <- 
+  dplyr::left_join(ar_meds_wide, 
+                   ar_medication_4th_entry, 
+                   by=c("id", 
+                        "assessment_id", 
+                        "meds_assessment_date"))
+
+ar_meds_wide <- 
+  dplyr::left_join(ar_meds_wide, 
+                   ar_medication_5th_entry, 
+                   by=c("id", 
+                        "assessment_id", 
+                        "meds_assessment_date"))
+
+ar_meds_wide <- 
+  dplyr::left_join(ar_meds_wide, 
+                   ar_medication_6th_entry, 
+                   by=c("id", 
+                        "assessment_id", 
+                        "meds_assessment_date"))
+
+print("Number of rows in the wide frame:")
+nrow(ar_meds_wide)
+```
+
+```{r, rationalise our frames in the environment}
+rm(ar_medication_1st_entry)
+
+rm(ar_medication_2nd_entry)
+
+rm(ar_medication_3rd_entry)
+
+rm(ar_medication_4th_entry)
+
+rm(ar_medication_5th_entry)
+
+rm(ar_medication_6th_entry)
+```
+
+```{r, code the number of entries in the wide frame to use to be able to sum columns whilst accounting for NA}
+#we have to account for missing data. Therefore for an entry to be valid, we need either medicine OR dose to be !is.na
+ar_meds_wide$data_entered_at_1 <-
+  ifelse(!is.na(ar_meds_wide$medicine_1) |
+         !is.na(ar_meds_wide$GC_dose_1),
+         1,
+         0)
+
+#repeat that for each of the six entries
+ar_meds_wide$data_entered_at_2 <-
+  ifelse(!is.na(ar_meds_wide$medicine_2) |
+         !is.na(ar_meds_wide$GC_dose_2),
+         1,
+         0)
+
+ar_meds_wide$data_entered_at_3 <-
+  ifelse(!is.na(ar_meds_wide$medicine_3) |
+         !is.na(ar_meds_wide$GC_dose_3),
+         1,
+         0)
+
+ar_meds_wide$data_entered_at_4 <-
+  ifelse(!is.na(ar_meds_wide$medicine_4) |
+         !is.na(ar_meds_wide$GC_dose_4),
+         1,
+         0)
+
+ar_meds_wide$data_entered_at_5 <-
+  ifelse(!is.na(ar_meds_wide$medicine_5) |
+         !is.na(ar_meds_wide$GC_dose_5),
+         1,
+         0)
+
+ar_meds_wide$data_entered_at_6 <-
+  ifelse(!is.na(ar_meds_wide$medicine_6) |
+         !is.na(ar_meds_wide$GC_dose_6),
+         1,
+         0)
+
+print("This is the number of dosing entries again, just in different format:")
+freq(ar_meds_wide$data_entered_at_1)
+freq(ar_meds_wide$data_entered_at_2)
+freq(ar_meds_wide$data_entered_at_3)
+freq(ar_meds_wide$data_entered_at_4)
+freq(ar_meds_wide$data_entered_at_5)
+freq(ar_meds_wide$data_entered_at_6)
+```
+
+```{r, create id_visit_date from id and assessment date to facilitate seeing duplicates, printing a check file review.csv to ensure }
+ar_meds_wide$id_visit_date <- 
+  as.factor(paste(ar_meds_wide$id, 
+        ar_meds_wide$meds_assessment_date, 
+        sep="_"))
+
+multiple_id_visit_date <- 
+  subset(as.data.frame(freq(ar_meds_wide$id_visit_date)), 
+         Freq>1 & Freq<5000)
+print("Number of duplicated id_visit_dates - after all the manual reviews, this should now be zero")
+nrow(multiple_id_visit_date)
+
+rows_with_multiple_id_visit_date <- 
+  rownames(multiple_id_visit_date)
+print("the following id_visit_date s are duplicated")
+rows_with_multiple_id_visit_date
+
+frame_with_multiple_id_visit_date <- 
+  subset(ar_meds_wide, 
+         id_visit_date %in% 
+           rows_with_multiple_id_visit_date)
+
+frame_with_multiple_id_visit_date <- 
+  frame_with_multiple_id_visit_date[order(
+    frame_with_multiple_id_visit_date$record_id_1,
+    frame_with_multiple_id_visit_date$assessment_id),] 
+
+write.csv(frame_with_multiple_id_visit_date, 
+          "frame_with_multiple_id_visit_date.csv", row.names = F)
+
+```
+
+```{r, remove duplicates and tidy the environment}
+rm(ar_meds_wide_id_visit_date_freq)
+
+rm(multiple)
+
+rm(rows_with_multiple_id_visit_date)
+
+rm(frame_with_multiple_id_visit_date)
+
+#check that I now don't have multiple id_visit_dates
+multiple_id_visit_date <- 
+  subset(as.data.frame(freq(ar_meds_wide$id_visit_date)), 
+         Freq>1 & Freq<5000000)
+
+print("the following should be one, provided we have removed all duplicates and thus have no duplicated id_visit_dates")
+nrow(multiple_id_visit_date)
+```
+
+```{r, check the combinations of glucocorticoid administration, to find out if they are on mixed dosing}
+ar_meds_wide$entry_2_GC_different_to_1 <- 
+  ifelse(
+  (ar_meds_wide$medicine_1) == (ar_meds_wide$medicine_2) |
+   is.na(ar_meds_wide$medicine_2) , 0 , 1
+)
+
+ar_meds_wide$entry_3_GC_different_to_1 <- 
+  ifelse(
+  (ar_meds_wide$medicine_1) == (ar_meds_wide$medicine_3) |
+   is.na(ar_meds_wide$medicine_3) , 0 , 1
+)
+
+ar_meds_wide$entry_4_GC_different_to_1 <- 
+  ifelse(
+  (ar_meds_wide$medicine_1) == (ar_meds_wide$medicine_4) |
+   is.na(ar_meds_wide$medicine_4) , 0 , 1
+)
+
+ar_meds_wide$entry_5_GC_different_to_1 <- 
+  ifelse(
+  (ar_meds_wide$medicine_1) == (ar_meds_wide$medicine_5) |
+   is.na(ar_meds_wide$medicine_5) , 0 , 1
+)
+
+ar_meds_wide$entry_6_GC_different_to_1 <- 
+  ifelse(
+  (ar_meds_wide$medicine_1) == (ar_meds_wide$medicine_6) |
+   is.na(ar_meds_wide$medicine_6) , 0 , 1
+)
+
+####
+
+ar_meds_wide$entry_3_GC_different_to_2 <- 
+  ifelse(
+  (ar_meds_wide$medicine_2) == (ar_meds_wide$medicine_3) |
+   is.na(ar_meds_wide$medicine_3) , 0 , 1
+)
+
+ar_meds_wide$entry_4_GC_different_to_2 <- 
+  ifelse(
+  (ar_meds_wide$medicine_2) == (ar_meds_wide$medicine_4) |
+   is.na(ar_meds_wide$medicine_4) , 0 , 1
+)
+
+ar_meds_wide$entry_5_GC_different_to_2 <- 
+  ifelse(
+  (ar_meds_wide$medicine_2) == (ar_meds_wide$medicine_5) |
+   is.na(ar_meds_wide$medicine_5) , 0 , 1
+)
+
+ar_meds_wide$entry_6_GC_different_to_2 <- 
+  ifelse(
+  (ar_meds_wide$medicine_2) == (ar_meds_wide$medicine_6) |
+   is.na(ar_meds_wide$medicine_6) , 0 , 1
+)
+
+####
+
+ar_meds_wide$entry_4_GC_different_to_3 <- 
+  ifelse(
+  (ar_meds_wide$medicine_3) == (ar_meds_wide$medicine_4) |
+   is.na(ar_meds_wide$medicine_4) , 0 , 1
+)
+
+ar_meds_wide$entry_5_GC_different_to_3 <- 
+  ifelse(
+  (ar_meds_wide$medicine_3) == (ar_meds_wide$medicine_5) |
+   is.na(ar_meds_wide$medicine_5) , 0 , 1
+)
+
+ar_meds_wide$entry_6_GC_different_to_3 <- 
+  ifelse(
+  (ar_meds_wide$medicine_3) == (ar_meds_wide$medicine_6) |
+   is.na(ar_meds_wide$medicine_6) , 0 , 1
+)
+
+#####
+
+ar_meds_wide$entry_5_GC_different_to_4 <- 
+  ifelse(
+  (ar_meds_wide$medicine_4) == (ar_meds_wide$medicine_5) |
+   is.na(ar_meds_wide$medicine_5) , 0 , 1
+)
+ar_meds_wide$entry_6_GC_different_to_4 <- 
+  ifelse(
+  (ar_meds_wide$medicine_4) == (ar_meds_wide$medicine_6) |
+   is.na(ar_meds_wide$medicine_6) , 0 , 1
+)
+
+#####
+
+ar_meds_wide$entry_6_GC_different_to_5 <- 
+  ifelse(
+  (ar_meds_wide$medicine_5) == (ar_meds_wide$medicine_6) |
+   is.na(ar_meds_wide$medicine_6) , 0 , 1
+)
+```
+
+```{r, create different_GC_used_on_same_day}
+ar_meds_wide$different_GC_used_on_same_day <- 
+  ar_meds_wide$entry_2_GC_different_to_1 + 
+  ar_meds_wide$entry_3_GC_different_to_1 + 
+  ar_meds_wide$entry_4_GC_different_to_1 + 
+  ar_meds_wide$entry_5_GC_different_to_1 + 
+  ar_meds_wide$entry_6_GC_different_to_1 + 
+  ar_meds_wide$entry_3_GC_different_to_2 + 
+  ar_meds_wide$entry_4_GC_different_to_2 + 
+  ar_meds_wide$entry_5_GC_different_to_2 + 
+  ar_meds_wide$entry_6_GC_different_to_2 + 
+  ar_meds_wide$entry_4_GC_different_to_3 + 
+  ar_meds_wide$entry_5_GC_different_to_3 + 
+  ar_meds_wide$entry_6_GC_different_to_3 + 
+  ar_meds_wide$entry_6_GC_different_to_4 + 
+  ar_meds_wide$entry_6_GC_different_to_4 + 
+  ar_meds_wide$entry_6_GC_different_to_5
+
+freq(ar_meds_wide$different_GC_used_on_same_day)
+
+ar_meds_wide$different_GC_on_same_day <- 
+  ifelse(ar_meds_wide$different_GC_used_on_same_day > 0, 1, 0)
+
+print ("number of patient assessments where we have mixed glucocorticoid dosing:")
+sum(ar_meds_wide$different_GC_on_same_day > 0, na.rm=T)
+
+#now to sum up the absolutely daily GC dose, we need to account for if we have data entered
+
+ar_meds_wide$absolute_daily_GC_dose_sum <- 
+  ifelse(ar_meds_wide$data_entered_at_1==1,
+    ar_meds_wide$GC_dose_1,
+    NA)
+
+#after this, we only replace the value if we have data entered at that entry
+ar_meds_wide$absolute_daily_GC_dose_sum <- 
+  ifelse(ar_meds_wide$data_entered_at_2==1,
+    ar_meds_wide$GC_dose_1 + 
+      ar_meds_wide$GC_dose_2 ,
+    ar_meds_wide$absolute_daily_GC_dose_sum)
+
+#this way if one of the doses' is NA, then we get NA as you would hope
+ar_meds_wide$absolute_daily_GC_dose_sum <- 
+  ifelse(ar_meds_wide$data_entered_at_3==1,
+    ar_meds_wide$GC_dose_1 + 
+      ar_meds_wide$GC_dose_2 + 
+      ar_meds_wide$GC_dose_3 ,
+    ar_meds_wide$absolute_daily_GC_dose_sum)
+ar_meds_wide$absolute_daily_GC_dose_sum <- 
+  ifelse(ar_meds_wide$data_entered_at_4==1,
+    ar_meds_wide$GC_dose_1 + 
+      ar_meds_wide$GC_dose_2 + 
+      ar_meds_wide$GC_dose_3 + 
+      ar_meds_wide$GC_dose_4 ,
+    ar_meds_wide$absolute_daily_GC_dose_sum)
+ar_meds_wide$absolute_daily_GC_dose_sum <- 
+  ifelse(ar_meds_wide$data_entered_at_5==1,
+    ar_meds_wide$GC_dose_1 + 
+      ar_meds_wide$GC_dose_2 + 
+      ar_meds_wide$GC_dose_3 + 
+      ar_meds_wide$GC_dose_4 + 
+      ar_meds_wide$GC_dose_5 ,
+    ar_meds_wide$absolute_daily_GC_dose_sum)
+ar_meds_wide$absolute_daily_GC_dose_sum <- 
+  ifelse(ar_meds_wide$data_entered_at_6==1,
+    ar_meds_wide$GC_dose_1 + 
+      ar_meds_wide$GC_dose_2 + 
+      ar_meds_wide$GC_dose_3 + 
+      ar_meds_wide$GC_dose_4 + 
+      ar_meds_wide$GC_dose_5 + 
+      ar_meds_wide$GC_dose_6 ,
+    ar_meds_wide$absolute_daily_GC_dose_sum)
+
+ar_meds_wide_with_zero_dose <- 
+  subset(ar_meds_wide, absolute_daily_GC_dose_sum==0)
+
+print("number of entries in ar_meds_wide with a non-sensical zero dose recording:")
+sum(is.na(ar_meds_wide$absolute_daily_GC_dose_sum))
+
+print("the following number should be zero, to confirm we have removed any empty entries that don't have dose or preparation:")
+sum(is.na(ar_meds_wide_with_zero_dose$medicine_1))
+
+print("NOTE: We are still left with entries that may be missing dose OR preparation, as these may be imputed later on")
+
+#now we have to correct that, because if it is zero, then it should actually be NA
+ar_meds_wide$absolute_daily_GC_dose_sum <- 
+  ifelse(ar_meds_wide$absolute_daily_GC_dose_sum ==0,
+         NA,
+         ar_meds_wide$absolute_daily_GC_dose_sum)
+
+```
+
+```{r, create daily preparation of GC to use column}
+#use medicine 1 if we know they don't have a different preparation on the same day
+ar_meds_wide$daily_preparation_of_GC_to_use <-
+  ifelse(ar_meds_wide$different_GC_used_on_same_day==0,
+         ar_meds_wide$medicine_1,
+         NA)
+
+#insert "mixed_dosing" if it's more than 0. This will mean that NAs stay as NA
+ar_meds_wide$daily_preparation_of_GC_to_use <-
+  ifelse(ar_meds_wide$different_GC_used_on_same_day>0,
+         "mixed_dosing",
+         ar_meds_wide$daily_preparation_of_GC_to_use)
+```
+
+check that entry
+
+```{r}
+check_frame <- 
+  ar_meds_wide[,c(
+  "id_visit_date",
+  "GC_dose_1",
+  "medicine_1",
+  "GC_dose_2",
+  "medicine_2",
+  "GC_dose_3",
+  "medicine_3",
+  "GC_dose_4",
+  "medicine_4",
+  "GC_dose_5",
+  "medicine_5",
+  "daily_preparation_of_GC_to_use")]
+
+check_frame_just_mixed_dosing <- 
+  subset(check_frame, daily_preparation_of_GC_to_use=="mixed_dosing")
+
+print("you can visually inspect check_frame_just_mixed_dosing to see what combinations of dosing people are on")
+```
+
+```{r, create an absolute dose of each preparation at each entry of each visit, to be robust against mixed dosing }
+#do this for entry 1
+ar_meds_wide$absolute_hydrocortisone_at_entry_1 <-
+  ifelse(ar_meds_wide$medicine_1=="hydrocortisone",
+         ar_meds_wide$GC_dose_1,
+         0)
+  
+ar_meds_wide$absolute_prednisolone_at_entry_1 <-
+  ifelse(ar_meds_wide$medicine_1=="prednisolone",
+         ar_meds_wide$GC_dose_1,
+         0)
+
+ar_meds_wide$absolute_prednisone_at_entry_1 <-
+  ifelse(ar_meds_wide$medicine_1=="prednisone",
+         ar_meds_wide$GC_dose_1,
+         0)
+
+ar_meds_wide$absolute_dexamethasone_at_entry_1 <-
+  ifelse(ar_meds_wide$medicine_1=="dexamethasone",
+         ar_meds_wide$GC_dose_1,
+         0)
+
+ar_meds_wide$absolute_cortisone_acetate_at_entry_1 <-
+  ifelse(ar_meds_wide$medicine_1=="cortisone_acetate",
+         ar_meds_wide$GC_dose_1,
+         0)
+  
+ar_meds_wide$absolute_other_at_entry_1 <-
+  ifelse(ar_meds_wide$medicine_1=="other",
+         ar_meds_wide$GC_dose_1,
+         0)
+  
+#do this for entry 2
+ar_meds_wide$absolute_hydrocortisone_at_entry_2 <-
+  ifelse(ar_meds_wide$medicine_2=="hydrocortisone",
+         ar_meds_wide$GC_dose_2,
+         0)
+  
+ar_meds_wide$absolute_prednisolone_at_entry_2 <-
+  ifelse(ar_meds_wide$medicine_2=="prednisolone",
+         ar_meds_wide$GC_dose_2,
+         0)
+
+ar_meds_wide$absolute_prednisone_at_entry_2 <-
+  ifelse(ar_meds_wide$medicine_2=="prednisone",
+         ar_meds_wide$GC_dose_2,
+         0)
+
+ar_meds_wide$absolute_dexamethasone_at_entry_2 <-
+  ifelse(ar_meds_wide$medicine_2=="dexamethasone",
+         ar_meds_wide$GC_dose_2,
+         0)
+
+ar_meds_wide$absolute_cortisone_acetate_at_entry_2 <-
+  ifelse(ar_meds_wide$medicine_2=="cortisone_acetate",
+         ar_meds_wide$GC_dose_2,
+         0)
+  
+ar_meds_wide$absolute_other_at_entry_2 <-
+  ifelse(ar_meds_wide$medicine_2=="other",
+         ar_meds_wide$GC_dose_2,
+         0)
+
+#do this for entry 3
+ar_meds_wide$absolute_hydrocortisone_at_entry_3 <-
+  ifelse(ar_meds_wide$medicine_3=="hydrocortisone",
+         ar_meds_wide$GC_dose_3,
+         0)
+  
+ar_meds_wide$absolute_prednisolone_at_entry_3 <-
+  ifelse(ar_meds_wide$medicine_3=="prednisolone",
+         ar_meds_wide$GC_dose_3,
+         0)
+
+ar_meds_wide$absolute_prednisone_at_entry_3 <-
+  ifelse(ar_meds_wide$medicine_3=="prednisone",
+         ar_meds_wide$GC_dose_3,
+         0)
+
+ar_meds_wide$absolute_dexamethasone_at_entry_3 <-
+  ifelse(ar_meds_wide$medicine_3=="dexamethasone",
+         ar_meds_wide$GC_dose_3,
+         0)
+
+ar_meds_wide$absolute_cortisone_acetate_at_entry_3 <-
+  ifelse(ar_meds_wide$medicine_3=="cortisone_acetate",
+         ar_meds_wide$GC_dose_3,
+         0)
+  
+ar_meds_wide$absolute_other_at_entry_3 <-
+  ifelse(ar_meds_wide$medicine_3=="other",
+         ar_meds_wide$GC_dose_3,
+         0)
+  
+#do this for entry 4
+ar_meds_wide$absolute_hydrocortisone_at_entry_4 <-
+  ifelse(ar_meds_wide$medicine_4=="hydrocortisone",
+         ar_meds_wide$GC_dose_4,
+         0)
+  
+ar_meds_wide$absolute_prednisolone_at_entry_4 <-
+  ifelse(ar_meds_wide$medicine_4=="prednisolone",
+         ar_meds_wide$GC_dose_4,
+         0)
+
+ar_meds_wide$absolute_prednisone_at_entry_4 <-
+  ifelse(ar_meds_wide$medicine_4=="prednisone",
+         ar_meds_wide$GC_dose_4,
+         0)
+
+ar_meds_wide$absolute_dexamethasone_at_entry_4 <-
+  ifelse(ar_meds_wide$medicine_4=="dexamethasone",
+         ar_meds_wide$GC_dose_4,
+         0)
+
+ar_meds_wide$absolute_cortisone_acetate_at_entry_4 <-
+  ifelse(ar_meds_wide$medicine_4=="cortisone_acetate",
+         ar_meds_wide$GC_dose_4,
+         0)
+  
+ar_meds_wide$absolute_other_at_entry_4 <-
+  ifelse(ar_meds_wide$medicine_4=="other",
+         ar_meds_wide$GC_dose_4,
+         0)
+  
+#do this for entry 5
+ar_meds_wide$absolute_hydrocortisone_at_entry_5 <-
+  ifelse(ar_meds_wide$medicine_5=="hydrocortisone",
+         ar_meds_wide$GC_dose_5,
+         0)
+  
+ar_meds_wide$absolute_prednisolone_at_entry_5 <-
+  ifelse(ar_meds_wide$medicine_5=="prednisolone",
+         ar_meds_wide$GC_dose_5,
+         0)
+
+ar_meds_wide$absolute_prednisone_at_entry_5 <-
+  ifelse(ar_meds_wide$medicine_5=="prednisone",
+         ar_meds_wide$GC_dose_5,
+         0)
+
+ar_meds_wide$absolute_dexamethasone_at_entry_5 <-
+  ifelse(ar_meds_wide$medicine_5=="dexamethasone",
+         ar_meds_wide$GC_dose_5,
+         0)
+
+ar_meds_wide$absolute_cortisone_acetate_at_entry_5 <-
+  ifelse(ar_meds_wide$medicine_5=="cortisone_acetate",
+         ar_meds_wide$GC_dose_5,
+         0)
+  
+ar_meds_wide$absolute_other_at_entry_5 <-
+  ifelse(ar_meds_wide$medicine_5=="other",
+         ar_meds_wide$GC_dose_5,
+         0)
+  
+#do this for entry 6
+ar_meds_wide$absolute_hydrocortisone_at_entry_6 <-
+  ifelse(ar_meds_wide$medicine_6=="hydrocortisone",
+         ar_meds_wide$GC_dose_6,
+         0)
+  
+ar_meds_wide$absolute_prednisolone_at_entry_6 <-
+  ifelse(ar_meds_wide$medicine_6=="prednisolone",
+         ar_meds_wide$GC_dose_6,
+         0)
+
+ar_meds_wide$absolute_prednisone_at_entry_6 <-
+  ifelse(ar_meds_wide$medicine_6=="prednisone",
+         ar_meds_wide$GC_dose_6,
+         0)
+
+ar_meds_wide$absolute_dexamethasone_at_entry_6 <-
+  ifelse(ar_meds_wide$medicine_6=="dexamethasone",
+         ar_meds_wide$GC_dose_6,
+         0)
+
+ar_meds_wide$absolute_cortisone_acetate_at_entry_6 <-
+  ifelse(ar_meds_wide$medicine_6=="cortisone_acetate",
+         ar_meds_wide$GC_dose_6,
+         0)
+  
+ar_meds_wide$absolute_other_at_entry_6 <-
+  ifelse(ar_meds_wide$medicine_6=="other",
+         ar_meds_wide$GC_dose_6,
+         0)
+```
+
+```{r, create absolute total dose of each preparation at each visit by summing up each entry separately}
+#start by putting in the total dose for patients from those that have data entered in 1 row - this will be the whole population of the frame. Later we then replace if they have more data
+ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_1==1,
+    ar_meds_wide$absolute_hydrocortisone_at_entry_1,
+    NA)
+
+ar_meds_wide$absolute_total_daily_prednisolone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_1==1,
+    ar_meds_wide$absolute_prednisolone_at_entry_1,
+    NA)
+
+ar_meds_wide$absolute_total_daily_prednisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_1==1,
+    ar_meds_wide$absolute_prednisone_at_entry_1,
+    NA)
+
+ar_meds_wide$absolute_total_daily_dexamethasone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_1==1,
+    ar_meds_wide$absolute_dexamethasone_at_entry_1,
+    NA)
+
+ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_1==1,
+    ar_meds_wide$absolute_cortisone_acetate_at_entry_1,
+    NA)
+
+ar_meds_wide$absolute_total_daily_other_GC_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_1==1,
+    ar_meds_wide$absolute_other_at_entry_1,
+    NA)
+#note we will have NA in some of these now, if we dont have a preparation for them
+
+#if they have data at 2, we then sum up all the hydrocortisones up to entry 2
+ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_2==1,
+    ar_meds_wide$absolute_hydrocortisone_at_entry_1 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_2 ,
+    ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit)
+
+ar_meds_wide$absolute_total_daily_prednisolone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_2==1,
+    ar_meds_wide$absolute_prednisolone_at_entry_1 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_2 ,
+    ar_meds_wide$absolute_total_daily_prednisolone_at_visit)
+
+ar_meds_wide$absolute_total_daily_prednisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_2==1,
+    ar_meds_wide$absolute_prednisone_at_entry_1 + 
+      ar_meds_wide$absolute_prednisone_at_entry_2 ,
+    ar_meds_wide$absolute_total_daily_prednisone_at_visit)
+
+ar_meds_wide$absolute_total_daily_dexamethasone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_2==1,
+    ar_meds_wide$absolute_dexamethasone_at_entry_1 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_2 ,
+    ar_meds_wide$absolute_total_daily_dexamethasone_at_visit)
+
+ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_2==1,
+    ar_meds_wide$absolute_cortisone_acetate_at_entry_1 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_2 ,
+    ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit)
+
+ar_meds_wide$absolute_total_daily_other_GC_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_2==1,
+    ar_meds_wide$absolute_other_at_entry_1 + 
+      ar_meds_wide$absolute_other_at_entry_2 ,
+    ar_meds_wide$absolute_total_daily_other_GC_at_visit)
+
+#if they have data at 3, we then sum up all the hydrocortisones up to entry 3
+ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_3==1,
+    ar_meds_wide$absolute_hydrocortisone_at_entry_1 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_2 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_3 ,
+    ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit)
+
+ar_meds_wide$absolute_total_daily_prednisolone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_3==1,
+    ar_meds_wide$absolute_prednisolone_at_entry_1 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_2  + 
+      ar_meds_wide$absolute_prednisolone_at_entry_3 ,
+    ar_meds_wide$absolute_total_daily_prednisolone_at_visit)
+
+ar_meds_wide$absolute_total_daily_prednisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_3==1,
+    ar_meds_wide$absolute_prednisone_at_entry_1 + 
+      ar_meds_wide$absolute_prednisone_at_entry_2  + 
+      ar_meds_wide$absolute_prednisone_at_entry_3 ,
+    ar_meds_wide$absolute_total_daily_prednisone_at_visit)
+
+ar_meds_wide$absolute_total_daily_dexamethasone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_3==1,
+    ar_meds_wide$absolute_dexamethasone_at_entry_1 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_2  + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_3 ,
+    ar_meds_wide$absolute_total_daily_dexamethasone_at_visit)
+
+ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_3==1,
+    ar_meds_wide$absolute_cortisone_acetate_at_entry_1 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_2 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_3 ,
+    ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit)
+
+ar_meds_wide$absolute_total_daily_other_GC_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_3==1,
+    ar_meds_wide$absolute_other_at_entry_1 + 
+      ar_meds_wide$absolute_other_at_entry_2  + 
+      ar_meds_wide$absolute_other_at_entry_3 ,
+    ar_meds_wide$absolute_total_daily_other_GC_at_visit)     
+     
+#if they have data at 4, we then sum up all the hydrocortisones up to entry 4
+ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_4==1,
+    ar_meds_wide$absolute_hydrocortisone_at_entry_1 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_2 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_3  + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_4 ,
+    ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit)
+
+ar_meds_wide$absolute_total_daily_prednisolone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_4==1,
+    ar_meds_wide$absolute_prednisolone_at_entry_1 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_2  + 
+      ar_meds_wide$absolute_prednisolone_at_entry_3 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_4 ,
+    ar_meds_wide$absolute_total_daily_prednisolone_at_visit)
+
+ar_meds_wide$absolute_total_daily_prednisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_4==1,
+    ar_meds_wide$absolute_prednisone_at_entry_1 + 
+      ar_meds_wide$absolute_prednisone_at_entry_2  + 
+      ar_meds_wide$absolute_prednisone_at_entry_3 + 
+      ar_meds_wide$absolute_prednisone_at_entry_4 ,
+    ar_meds_wide$absolute_total_daily_prednisone_at_visit)
+
+ar_meds_wide$absolute_total_daily_dexamethasone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_4==1,
+    ar_meds_wide$absolute_dexamethasone_at_entry_1 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_2  + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_3 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_4 ,
+    ar_meds_wide$absolute_total_daily_dexamethasone_at_visit)
+
+ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_4==1,
+    ar_meds_wide$absolute_cortisone_acetate_at_entry_1 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_2  + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_3 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_4 ,
+    ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit)
+
+ar_meds_wide$absolute_total_daily_other_GC_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_4==1,
+    ar_meds_wide$absolute_other_at_entry_1 + 
+      ar_meds_wide$absolute_other_at_entry_2  + 
+      ar_meds_wide$absolute_other_at_entry_3 + 
+      ar_meds_wide$absolute_other_at_entry_4 ,
+    ar_meds_wide$absolute_total_daily_other_GC_at_visit)     
+     
+     
+#if they have data at 5, we then sum up all the hydrocortisones up to entry 5
+ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_5==1,
+    ar_meds_wide$absolute_hydrocortisone_at_entry_1 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_2 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_3 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_4 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_5 ,
+    ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit)
+
+ar_meds_wide$absolute_total_daily_prednisolone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_5==1,
+    ar_meds_wide$absolute_prednisolone_at_entry_1 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_2 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_3 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_4 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_5 ,
+    ar_meds_wide$absolute_total_daily_prednisolone_at_visit)
+
+ar_meds_wide$absolute_total_daily_prednisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_5==1,
+    ar_meds_wide$absolute_prednisone_at_entry_1 + 
+      ar_meds_wide$absolute_prednisone_at_entry_2 + 
+      ar_meds_wide$absolute_prednisone_at_entry_3 + 
+      ar_meds_wide$absolute_prednisone_at_entry_4 + 
+      ar_meds_wide$absolute_prednisone_at_entry_5 ,
+    ar_meds_wide$absolute_total_daily_prednisone_at_visit)
+
+ar_meds_wide$absolute_total_daily_dexamethasone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_5==1,
+    ar_meds_wide$absolute_dexamethasone_at_entry_1 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_2 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_3 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_4 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_5 ,
+    ar_meds_wide$absolute_total_daily_dexamethasone_at_visit)
+
+ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_5==1,
+    ar_meds_wide$absolute_cortisone_acetate_at_entry_1 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_2 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_3 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_4 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_5 ,
+    ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit)
+
+ar_meds_wide$absolute_total_daily_other_GC_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_5==1,
+    ar_meds_wide$absolute_other_at_entry_1 + 
+      ar_meds_wide$absolute_other_at_entry_2 + 
+      ar_meds_wide$absolute_other_at_entry_3 + 
+      ar_meds_wide$absolute_other_at_entry_4 + 
+      ar_meds_wide$absolute_other_at_entry_5 ,
+    ar_meds_wide$absolute_total_daily_other_GC_at_visit)     
+     
+     
+#if they have data at 6, we then sum up all the hydrocortisones up to entry 6
+ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_6==1,
+    ar_meds_wide$absolute_hydrocortisone_at_entry_1 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_2 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_3 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_4 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_5 + 
+      ar_meds_wide$absolute_hydrocortisone_at_entry_6 ,
+    ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit)
+
+ar_meds_wide$absolute_total_daily_prednisolone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_6==1,
+    ar_meds_wide$absolute_prednisolone_at_entry_1 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_2 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_3 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_4 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_5 + 
+      ar_meds_wide$absolute_prednisolone_at_entry_6 ,
+    ar_meds_wide$absolute_total_daily_prednisolone_at_visit)
+
+ar_meds_wide$absolute_total_daily_prednisone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_6==1,
+    ar_meds_wide$absolute_prednisone_at_entry_1 + 
+      ar_meds_wide$absolute_prednisone_at_entry_2 + 
+      ar_meds_wide$absolute_prednisone_at_entry_3 + 
+      ar_meds_wide$absolute_prednisone_at_entry_4 + 
+      ar_meds_wide$absolute_prednisone_at_entry_5 + 
+      ar_meds_wide$absolute_prednisone_at_entry_6 ,
+    ar_meds_wide$absolute_total_daily_prednisone_at_visit)
+
+ar_meds_wide$absolute_total_daily_dexamethasone_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_6==1,
+    ar_meds_wide$absolute_dexamethasone_at_entry_1 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_2 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_3 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_4 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_5 + 
+      ar_meds_wide$absolute_dexamethasone_at_entry_6 ,
+    ar_meds_wide$absolute_total_daily_dexamethasone_at_visit)
+
+ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_6==1,
+    ar_meds_wide$absolute_cortisone_acetate_at_entry_1 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_2 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_3 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_4 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_5 + 
+      ar_meds_wide$absolute_cortisone_acetate_at_entry_6 ,
+    ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit)
+
+ar_meds_wide$absolute_total_daily_other_GC_at_visit <-
+  ifelse(ar_meds_wide$data_entered_at_6==1,
+    ar_meds_wide$absolute_other_at_entry_1 + 
+      ar_meds_wide$absolute_other_at_entry_2 + 
+      ar_meds_wide$absolute_other_at_entry_3 + 
+      ar_meds_wide$absolute_other_at_entry_4 + 
+      ar_meds_wide$absolute_other_at_entry_5 + 
+      ar_meds_wide$absolute_other_at_entry_6 ,
+    ar_meds_wide$absolute_total_daily_other_GC_at_visit)     
+     
+print("This code looks really inefficient, but the point is it has been designed to sum up total doses, but if we are missing a dose, then we will have an NA value. But we don't have NA values for entries that simply have less frequent dosing.")
+
+frame_to_review <- 
+  ar_meds_wide[,c(
+    "daily_preparation_of_GC_to_use",
+    "id_visit_date",
+    "medicine_1",
+    "medicine_2",
+    "medicine_3",
+    "medicine_4",
+    "GC_dose_1",
+    "GC_dose_2",
+    "GC_dose_3",
+    "absolute_daily_GC_dose_sum",
+    "absolute_total_daily_hydrocortisone_at_visit",
+    "absolute_total_daily_prednisone_at_visit",
+    "absolute_total_daily_prednisolone_at_visit",
+    "absolute_total_daily_dexamethasone_at_visit",
+    "absolute_total_daily_cortisone_acetate_at_visit")]
+
+write.csv(frame_to_review, "frame_to_review.csv")
+
+frame_to_review_na_medicine_2 <- 
+  subset(frame_to_review, 
+         is.na(medicine_2))
+
+frame_to_review_na_dose_2 <- 
+  subset(frame_to_review, 
+         is.na(GC_dose_2))
+
+frame_to_review_mixed_dosing <- 
+  subset(frame_to_review, 
+         daily_preparation_of_GC_to_use=="mixed_dosing")
+
+print("You can inspect frame_to_review_na_medicine_2 and sort by GC_dose_2. You should get a total dose for patients that have numbers for all their doses, but individual doses as NA because we are not sure of preparation. ")
+
+print("You can inspect frame_to_review_na_dose_2 and sort by medicine_2. You should NOT get a total dose for patients because we are unsure of one of the doses, but individual doses you should get some that are zero and others that are NA because we know the preparations (i.e. we know if a patient is NOT on that preparation. ")
+
+print("This therefore shows that we have summed retaining appropriate NA values in sum columns, allbeit in a very round about fashion")
+```
+
+```{r, create hydrocortisone equivalent - we can simply tot up our absolute totals of each preparation, multiplying by appropriate factors}
+prednisolone_to_hydrocortisone_conversion <- 4
+
+dexamethasone_to_hydrocortisone_conversion <- 80
+
+cortisone_acetate_to_hydrocortisone_conversion <- 0.8
+
+methylprednisolone_to_hydrocortisone_conversion <- 5
+
+#https://cks.nice.org.uk/topics/corticosteroids-oral/background-information/equivalent-anti-inflammatory-doses/
+
+ar_meds_wide$total_daily_hydrocortisone_equivalent_at_visit <-
+  ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit + 
+  
+  ar_meds_wide$absolute_total_daily_prednisolone_at_visit * 
+  prednisolone_to_hydrocortisone_conversion + 
+  
+  ar_meds_wide$absolute_total_daily_prednisone_at_visit *        
+  prednisolone_to_hydrocortisone_conversion + 
+  
+  ar_meds_wide$absolute_total_daily_dexamethasone_at_visit *     
+  dexamethasone_to_hydrocortisone_conversion + 
+  
+  ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit * 
+  cortisone_acetate_to_hydrocortisone_conversion
+
+#then make it NA if we are taking any 'other'
+ar_meds_wide$total_daily_hydrocortisone_equivalent_at_visit <- 
+  ifelse(ar_meds_wide$absolute_total_daily_other_GC_at_visit>0,
+         NA,
+         ar_meds_wide$total_daily_hydrocortisone_equivalent_at_visit)
+
+descr(ar_meds_wide$total_daily_hydrocortisone_equivalent_at_visit)
+```
+
+```{r, remove all of the unnecessary columns, including id because I will just join by id_visit_date}
+#add a visits in meds data to column to let us know after joining that it's in the meds data
+ar_meds_wide$visit_in_meds_data <- 1
+
+#create a backup for the environment before I cull the columns
+ar_meds_wide_backup <- ar_meds_wide
+#cull the columns
+ar_meds_wide <-
+  ar_meds_wide_backup[,c(
+    "id_visit_date",
+    "visit_in_meds_data",
+    "meds_centre_name_1",
+    "medicine_1",
+    "GC_dose_1",
+    "meds_unit_1",
+    "meds_time_1",
+    "meds_clock_time_1",
+    "medicine_2",
+    "GC_dose_2",
+    "meds_unit_2",
+    "meds_time_2",
+    "meds_clock_time_2",
+    "medicine_3",
+    "GC_dose_3",
+    "meds_unit_3",
+    "meds_time_3",
+    "meds_clock_time_3",
+    "medicine_4",
+    "GC_dose_4",
+    "meds_unit_4",
+    "meds_time_4",
+    "meds_clock_time_4",
+    "medicine_5",
+    "GC_dose_5",
+    "meds_unit_5",
+    "meds_time_5",
+    "meds_clock_time_5",
+    "medicine_6",
+    "GC_dose_6",
+    "meds_unit_6",
+    "meds_time_6",
+    "meds_clock_time_6",
+    "different_GC_used_on_same_day",
+    "absolute_daily_GC_dose_sum",
+    "daily_preparation_of_GC_to_use",
+    "absolute_total_daily_hydrocortisone_at_visit",
+    "absolute_total_daily_prednisolone_at_visit",
+    "absolute_total_daily_prednisone_at_visit",
+    "absolute_total_daily_dexamethasone_at_visit",
+    "absolute_total_daily_cortisone_acetate_at_visit",
+    "absolute_total_daily_other_GC_at_visit",
+    "total_daily_hydrocortisone_equivalent_at_visit"
+    )]
+
+
+```
+
+```{r, final checks of wide frame}
+sink("Final_review_of_ar_meds_wide_frame.txt")
+print("This should say zero to show id_visit_date is unique")
+subset(
+  rownames_to_column(
+    as.data.frame(
+      freq(
+        ar_meds_wide$id_visit_date))), 
+  Freq>1)$Freq -
+  nrow(ar_meds_wide)
+
+freq(ar_meds_wide$visit_in_meds_data)
+freq(ar_meds_wide$meds_centre_name_1)
+freq(ar_meds_wide$medicine_1)
+freq(ar_meds_wide$medicine_2)
+freq(ar_meds_wide$medicine_3)
+freq(ar_meds_wide$medicine_4)
+freq(ar_meds_wide$medicine_5)
+freq(ar_meds_wide$medicine_6)
+descr(ar_meds_wide$GC_dose_1)
+descr(ar_meds_wide$GC_dose_2)
+descr(ar_meds_wide$GC_dose_3)
+descr(ar_meds_wide$GC_dose_4)
+descr(ar_meds_wide$GC_dose_5)
+descr(ar_meds_wide$GC_dose_6)
+freq(ar_meds_wide$meds_unit_1)
+freq(ar_meds_wide$meds_time_1)
+freq(ar_meds_wide$meds_clock_time_1)
+freq(ar_meds_wide$different_GC_used_on_same_day)
+#shows we should look at patient 1629 to see if obviously hydrocortisone
+descr(ar_meds_wide$absolute_daily_GC_dose_sum)
+freq(ar_meds_wide$daily_preparation_of_GC_to_use)
+descr(ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit)
+descr(ar_meds_wide$absolute_total_daily_prednisolone_at_visit)
+descr(ar_meds_wide$absolute_total_daily_prednisone_at_visit)
+descr(ar_meds_wide$absolute_total_daily_dexamethasone_at_visit)
+descr(ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit)
+descr(ar_meds_wide$total_daily_hydrocortisone_equivalent_at_visit)
+
+print("Those being close to zero makes sense, becaues they are zero inflated. These next ones show us the average doses of those that have more than zero dosing:")
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_hydrocortisone_at_visit>0)$absolute_total_daily_hydrocortisone_at_visit)
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_prednisolone_at_visit>0)$absolute_total_daily_prednisolone_at_visit)
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_prednisone_at_visit>0)$absolute_total_daily_prednisone_at_visit)
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_dexamethasone_at_visit>0)$absolute_total_daily_dexamethasone_at_visit)
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_cortisone_acetate_at_visit>0)$absolute_total_daily_cortisone_acetate_at_visit)
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_other_GC_at_visit>0)$absolute_total_daily_other_GC_at_visit)
+
+ar_meds_wide_cortisone_acetate <- 
+  subset(
+    ar_meds_wide, 
+    daily_preparation_of_GC_to_use=="cortisone_acetate")
+
+descr(
+  ar_meds_wide_cortisone_acetate$absolute_total_daily_cortisone_acetate_at_visit)
+
+descr(ar_meds_wide_cortisone_acetate$total_daily_hydrocortisone_equivalent_at_visit)
+
+sink()
+```
+
+```{r, final checks of wide frame not sunk}
+
+print("This should say zero to show id_visit_date is unique")
+subset(
+  rownames_to_column(
+    as.data.frame(
+      freq(
+        ar_meds_wide$id_visit_date))), 
+  Freq>1)$Freq -
+  nrow(ar_meds_wide)
+
+freq(ar_meds_wide$visit_in_meds_data)
+freq(ar_meds_wide$meds_centre_name_1)
+freq(ar_meds_wide$medicine_1)
+freq(ar_meds_wide$medicine_2)
+freq(ar_meds_wide$medicine_3)
+freq(ar_meds_wide$medicine_4)
+freq(ar_meds_wide$medicine_5)
+freq(ar_meds_wide$medicine_6)
+descr(ar_meds_wide$GC_dose_1)
+descr(ar_meds_wide$GC_dose_2)
+descr(ar_meds_wide$GC_dose_3)
+descr(ar_meds_wide$GC_dose_4)
+descr(ar_meds_wide$GC_dose_5)
+descr(ar_meds_wide$GC_dose_6)
+freq(ar_meds_wide$meds_unit_1)
+#show those without unit
+ar_meds_wide_without_unit <-
+  subset(ar_meds_wide, is.na(meds_unit_1))
+freq(ar_meds_wide$meds_time_1)
+freq(ar_meds_wide$meds_clock_time_1)
+freq(ar_meds_wide$different_GC_used_on_same_day)
+#shows we should look at patient 1629 to see if obviously hydrocortisone
+descr(ar_meds_wide$absolute_daily_GC_dose_sum)
+freq(ar_meds_wide$daily_preparation_of_GC_to_use)
+descr(ar_meds_wide$absolute_total_daily_hydrocortisone_at_visit)
+descr(ar_meds_wide$absolute_total_daily_prednisolone_at_visit)
+descr(ar_meds_wide$absolute_total_daily_prednisone_at_visit)
+descr(ar_meds_wide$absolute_total_daily_dexamethasone_at_visit)
+descr(ar_meds_wide$absolute_total_daily_cortisone_acetate_at_visit)
+descr(ar_meds_wide$total_daily_hydrocortisone_equivalent_at_visit)
+
+print("Those being close to zero makes sense, becaues they are zero inflated. These next ones show us the average doses of those that have more than zero dosing:")
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_hydrocortisone_at_visit>0)$absolute_total_daily_hydrocortisone_at_visit)
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_prednisolone_at_visit>0)$absolute_total_daily_prednisolone_at_visit)
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_prednisone_at_visit>0)$absolute_total_daily_prednisone_at_visit)
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_dexamethasone_at_visit>0)$absolute_total_daily_dexamethasone_at_visit)
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_cortisone_acetate_at_visit>0)$absolute_total_daily_cortisone_acetate_at_visit)
+
+descr(
+  subset(
+    ar_meds_wide, 
+    absolute_total_daily_other_GC_at_visit>0)$absolute_total_daily_other_GC_at_visit)
+
+ar_meds_wide_cortisone_acetate <- 
+  subset(
+    ar_meds_wide, 
+    daily_preparation_of_GC_to_use=="cortisone_acetate")
+
+descr(
+  ar_meds_wide_cortisone_acetate$absolute_total_daily_cortisone_acetate_at_visit)
+
+descr(ar_meds_wide_cortisone_acetate$total_daily_hydrocortisone_equivalent_at_visit)
+
+
+```
+
+```{r, print ar_meds_wide.csv}
+print("Final number of rows in ar_meds_wide frame with one patient visit per row to join in later:")
+
+nrow(ar_meds_wide)
+
+write.csv(
+  ar_meds_wide, 
+  "ar_meds_wide.csv", 
+  row.names = F)
+```
+
+```{r, %% number of medication assessment_dates changed}
+ar_medication$assessment_date_changed <-
+  ifelse(ar_medication$assessment_date !=
+  ar_medication$original_assessment_date |
+         is.na(ar_medication$assessment_date) &
+           !is.na(ar_medication$original_assessment_date) |
+         !is.na(ar_medication$assessment_date) &
+           is.na(ar_medication$original_assessment_date),
+         1,
+         0)
+
+print("Number of visits with manually corrected assessment_date")
+sum(ar_medication$assessment_date_changed, na.rm=T)
+
+print("Number of visits with missing assessment_date")
+sum(is.na(ar_medication$original_assessment_date), na.rm=T)
+
+print("Number of visits with assessment_date")
+sum(!is.na(ar_medication$assessment_date_changed), na.rm=T)
+
+print("Total number of rows in original medication data prior to insertion and then removal of duplications")
+
+nrow(ar_medication_original)
+print("Total number of rows in medication data without duplications")
+
+nrow(ar_medication)
+
+nrow(ar_medication) - 13953
+```
+
+
+```{r, %% number of medication medicine column changed}
+ar_medication$medicine_changed <-
+  ifelse(ar_medication$medicine !=
+  ar_medication$original_medicine |
+         is.na(ar_medication$medicine) &
+           !is.na(ar_medication$original_medicine) |
+         !is.na(ar_medication$medicine) &
+           is.na(ar_medication$original_medicine),
+         1,
+         0)
+
+print("Number of visits with manually corrected medicine")
+sum(ar_medication$medicine_changed, na.rm=T)
+
+print("Number of visits with missing medicine")
+sum(is.na(ar_medication$original_medicine), na.rm=T)
+
+print("Number of visits with medicine")
+sum(!is.na(ar_medication$medicine_changed), na.rm=T)
+
+print("Total number of rows in labs data without duplications")
+nrow(ar_medication)
+```
+
+```{r, %% number of medication dose column changed}
+ar_medication$dose_changed <-
+  ifelse(ar_medication$dose !=
+  ar_medication$original_dose |
+         is.na(ar_medication$dose) &
+           !is.na(ar_medication$original_dose) |
+         !is.na(ar_medication$dose) &
+           is.na(ar_medication$original_dose),
+         1,
+         0)
+
+print("Number of visits with manually corrected dose")
+sum(ar_medication$dose_changed, na.rm=T)
+
+print("Number of visits with missing dose")
+sum(is.na(ar_medication$original_dose), na.rm=T)
+
+print("Number of visits with dose")
+sum(!is.na(ar_medication$dose_changed), na.rm=T)
+
+print("Total number of rows in labs data without duplications")
+nrow(ar_medication)
+```
+
+```{r, %% number of medication unit column changed}
+ar_medication$unit_changed <-
+  ifelse(ar_medication$unit !=
+  ar_medication$original_unit |
+         is.na(ar_medication$unit) &
+           !is.na(ar_medication$original_unit) |
+         !is.na(ar_medication$unit) &
+           is.na(ar_medication$original_unit),
+         1,
+         0)
+
+print("Number of visits with manually corrected unit")
+sum(ar_medication$unit_changed, na.rm=T)
+
+print("Number of visits with missing unit")
+sum(is.na(ar_medication$original_unit), na.rm=T)
+
+print("Number of visits with unit")
+sum(!is.na(ar_medication$unit_changed), na.rm=T)
+
+print("Total number of rows in labs data without duplications")
+nrow(ar_medication)
+```
+
+```{r, %% number of medication time column changed}
+ar_medication$time_changed <-
+  ifelse(ar_medication$time !=
+  ar_medication$original_time |
+         is.na(ar_medication$time) &
+           !is.na(ar_medication$original_time) |
+         !is.na(ar_medication$time) &
+           is.na(ar_medication$original_time),
+         1,
+         0)
+
+print("Number of visits with manually corrected time")
+sum(ar_medication$time_changed, na.rm=T)
+
+print("Number of visits with missing time")
+sum(is.na(ar_medication$original_time), na.rm=T)
+
+print("Number of visits with time")
+sum(!is.na(ar_medication$time_changed), na.rm=T)
+
+print("Total number of rows in labs data without duplications")
+nrow(ar_medication)
+```
+```{r, remove unnecessary saves}
+rm(ar_medication)
+rm(ar_participants_longitudinal_data)
+```
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory = location_of_data_files,
+  parent_file = "file_8")
+Sys.time()
+```

@@ -1,0 +1,334 @@
+Load packages and reread files using the prebuilt load files function
+
+```{r, load packages}
+rm(list = ls())
+
+#we first establish the location of the working directory where we keep everything, depending on whether it exists (i.e. which computer we are using)
+#check C drive
+#take the working directory otherwise, which should work every time
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- getwd()
+}
+
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+#we load the ar_participants just to compare dates of visits
+load_ar_files_function(previous_file_name = "file_4",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_labs_to_widen"))
+
+```
+
+```{r, log transformation}
+#give me a log value column 
+ar_labs_to_widen$log_value_number <-
+  log(ar_labs_to_widen$value_number)
+```
+
+
+```{r, load units information from centres, correct some of the spellings of units and shape to join}
+units_from_centres_17OHP_and_androstenedione <- 
+  read.csv("./2025_02_14_AR_other_csv_files_to_load/2025_Results_of_centre_contacts_updated_ar_centre_names.csv")
+
+unique(units_from_centres_17OHP_and_androstenedione$Centre.Name)
+
+#correct spelling and standardise to lower case for ng/dl
+
+units_from_centres_17OHP_and_androstenedione$Units.of.17OHP <-
+  ifelse(units_from_centres_17OHP_and_androstenedione$Units.of.17OHP=="ng/dL",
+         "ng/dl",
+         units_from_centres_17OHP_and_androstenedione$Units.of.17OHP)
+units_from_centres_17OHP_and_androstenedione$Units.of.Androstenedione <-
+  ifelse(units_from_centres_17OHP_and_androstenedione$Units.of.Androstenedione=="ng/dL",
+         "ng/dl",
+         units_from_centres_17OHP_and_androstenedione$Units.of.Androstenedione)
+
+```
+
+
+```{r, load units information from centres, correct some of the spellings of units and shape to join}
+units_from_centres_renin_and_pra <- 
+  read.csv("./2025_02_14_AR_other_csv_files_to_load/2025_centre_renin_units_frame_with_email_log_updated_ar_centre_names.csv", skip=1)
+
+freq(units_from_centres_renin_and_pra$Unit.confirmation.Renin)
+freq(units_from_centres_renin_and_pra$Unit.confirmation.plasma.renin.activity)
+
+contact_units_17_ohp_to_join <- 
+  units_from_centres_17OHP_and_androstenedione[,c(
+    "Centre.Name", 
+    "Units.of.17OHP")]
+contact_units_17_ohp_to_join$Centre.Name
+
+contact_units_andro_to_join <- 
+  units_from_centres_17OHP_and_androstenedione[,c(
+    "Centre.Name", 
+    "Units.of.Androstenedione")]
+
+contact_units_renin_to_join <- 
+  units_from_centres_renin_and_pra[,c(
+    "centre", 
+    "Unit.confirmation.Renin")]
+
+contact_units_renin_to_join <-
+  subset(contact_units_renin_to_join, 
+           Unit.confirmation.Renin !="" & 
+           Unit.confirmation.Renin !="change to pra" )
+
+contact_units_pra_to_join <- 
+  units_from_centres_renin_and_pra[,c(
+    "centre", 
+    "Unit.confirmation.plasma.renin.activity")]
+
+contact_units_pra_to_join <-
+  subset(contact_units_pra_to_join, 
+         Unit.confirmation.plasma.renin.activity !="" & 
+           Unit.confirmation.plasma.renin.activity !="change to renin" & 
+           Unit.confirmation.plasma.renin.activity !="awaited" )
+
+#note with 17OHP we genuinely do have readings that are reported in units 1000x what other centres use
+contact_units_17_ohp_to_join <- 
+  contact_units_17_ohp_to_join %>% 
+  filter(Units.of.17OHP=="ng/dl"  | 
+         Units.of.17OHP=="ng/dL"  |
+         Units.of.17OHP=="ng/ml"  | 
+         Units.of.17OHP=="ng/mL"  |
+         Units.of.17OHP=="nmol/l" |
+         Units.of.17OHP=="nmol/L")
+
+#note with androstenedione we do definitely genuinely do have readings that are reported in units 1000x what other centres use, however, I wouldn't be surprised if some units were mistaken that they use ng/ml and they actually use ng/dl - may need to consider reassessing them if something comes out
+contact_units_andro_to_join <- 
+  contact_units_andro_to_join %>% 
+  filter(Units.of.Androstenedione=="ng/dl"  |
+         Units.of.Androstenedione=="ng/dL"  | 
+         Units.of.Androstenedione=="ng/ml"  | 
+         Units.of.Androstenedione=="ng/mL"  | 
+         Units.of.Androstenedione=="nmol/L" | 
+         Units.of.Androstenedione=="nmol/l")
+
+contact_units_renin_to_join <- 
+  contact_units_renin_to_join %>% 
+  filter(Unit.confirmation.Renin!="" & 
+           Unit.confirmation.Renin!="change_to_pra") # note the manual change of one centre we will adjust later
+
+#correct and standardise the spellings for renin
+contact_units_renin_to_join$Unit.confirmation.Renin <-
+  ifelse(contact_units_renin_to_join$Unit.confirmation.Renin=="microunits/ml",
+         "µIU/ml",
+         contact_units_renin_to_join$Unit.confirmation.Renin)
+
+contact_units_renin_to_join$Unit.confirmation.Renin <-
+  ifelse(contact_units_renin_to_join$Unit.confirmation.Renin=="microU/ml",
+         "µIU/ml",
+         contact_units_renin_to_join$Unit.confirmation.Renin)
+
+contact_units_renin_to_join$Unit.confirmation.Renin <-
+  ifelse(contact_units_renin_to_join$Unit.confirmation.Renin=="microUI/ml",
+         "µIU/ml",
+         contact_units_renin_to_join$Unit.confirmation.Renin)
+
+contact_units_renin_to_join$Unit.confirmation.Renin <-
+  ifelse(contact_units_renin_to_join$Unit.confirmation.Renin=="microU/mL",
+         "µIU/ml",
+         contact_units_renin_to_join$Unit.confirmation.Renin)
+
+contact_units_renin_to_join$Unit.confirmation.Renin <-
+  ifelse(contact_units_renin_to_join$Unit.confirmation.Renin=="microIU/ml",
+         "µIU/ml",
+         contact_units_renin_to_join$Unit.confirmation.Renin)
+  
+contact_units_renin_to_join$Unit.confirmation.Renin <-
+  ifelse(contact_units_renin_to_join$Unit.confirmation.Renin=="mU/l",
+         "µIU/ml",
+         contact_units_renin_to_join$Unit.confirmation.Renin)
+  
+contact_units_renin_to_join$Unit.confirmation.Renin <-
+  ifelse(contact_units_renin_to_join$Unit.confirmation.Renin=="mU/L",
+         "µIU/ml",
+         contact_units_renin_to_join$Unit.confirmation.Renin)
+  
+contact_units_pra_to_join <- 
+  contact_units_pra_to_join %>% 
+  filter(Unit.confirmation.plasma.renin.activity!="" & 
+           Unit.confirmation.plasma.renin.activity!="change to renin" &
+           Unit.confirmation.plasma.renin.activity!="awaited")
+
+#correct and standardise the spellings for renin
+
+contact_units_pra_to_join$Unit.confirmation.plasma.renin.activity <-
+  ifelse(contact_units_pra_to_join$Unit.confirmation.plasma.renin.activity=="ng/ml/hour",
+         "ng/ml/hr",
+         contact_units_pra_to_join$Unit.confirmation.plasma.renin.activity)
+
+contact_units_pra_to_join$Unit.confirmation.plasma.renin.activity <-
+  ifelse(contact_units_pra_to_join$Unit.confirmation.plasma.renin.activity=="ng/mL/hr",
+         "ng/ml/hr",
+         contact_units_pra_to_join$Unit.confirmation.plasma.renin.activity)
+
+contact_units_pra_to_join$Unit.confirmation.plasma.renin.activity <-
+  ifelse(contact_units_pra_to_join$Unit.confirmation.plasma.renin.activity=="ng/ml/hs",
+         "ng/ml/hr",
+         contact_units_pra_to_join$Unit.confirmation.plasma.renin.activity)
+unique(contact_units_pra_to_join$Unit.confirmation.plasma.renin.activity)
+```
+
+```{r, join the unit information}
+ar_labs_to_widen_with_ohp_units <- 
+  dplyr::left_join(ar_labs_to_widen , 
+                   contact_units_17_ohp_to_join ,
+            by=c(
+              "labs_centre_name"="Centre.Name"))
+
+ar_labs_to_widen_with_androstenedione_units <- 
+  dplyr::left_join(ar_labs_to_widen_with_ohp_units , 
+                   contact_units_andro_to_join ,
+            by=c(
+              "labs_centre_name"="Centre.Name"))
+
+ar_labs_to_widen_with_renin_units <- 
+  dplyr::left_join(ar_labs_to_widen_with_androstenedione_units , 
+                   contact_units_renin_to_join ,
+            by=c(
+              "labs_centre_name"="centre"))
+
+ar_labs_to_widen_with_units <- 
+  dplyr::left_join(ar_labs_to_widen_with_renin_units , 
+                   contact_units_pra_to_join ,
+            by=c(
+              "labs_centre_name"="centre"))
+
+centre_names <- 
+  freq(ar_labs_to_widen_with_units$labs_centre_name)
+
+centre_names_frame <- 
+  as.data.frame(rownames(centre_names))
+
+write.csv(centre_names_frame, 
+          "original_ar_centre_names.csv", row.names = F)
+
+names(ar_labs_to_widen_with_units)[names(ar_labs_to_widen_with_units)=="Units.of.17OHP"] <- 
+  "first_contact_17ohp_units"
+
+names(ar_labs_to_widen_with_units)[names(ar_labs_to_widen_with_units)=="Units.of.Androstenedione"] <-
+  "first_contact_androstenedione_units"
+
+print("check I havent added any rows when joining, the following number should be zero:")
+nrow(ar_labs_to_widen) - nrow(ar_labs_to_widen_with_units)
+
+```
+
+
+```{r, assessing discrepancies in units for 17OHP between this extraction and the contact with centres in 2021}
+ar_labs_to_widen_with_units_17ohp_only <- 
+  subset(ar_labs_to_widen_with_units, 
+         marker=="ohp17")
+
+ar_labs_to_widen_with_units_androstenedione_only <- 
+  subset(ar_labs_to_widen_with_units, 
+         marker=="andostenedione")
+
+ohp_unit_discrepancy <- 
+  subset(ar_labs_to_widen_with_units_17ohp_only, 
+         !is.na(units))
+
+ohp_unit_discrepancy <- 
+  subset(ohp_unit_discrepancy, 
+         !is.na(first_contact_17ohp_units))
+
+ohp_unit_discrepancy$units_discrepancy <- 
+  ifelse(ohp_unit_discrepancy$units != 
+           ohp_unit_discrepancy$first_contact_17ohp_units, 
+         1, 
+         0)
+
+```
+
+```{r,  assessing discrepancies in units for Androstenedione between this extraction and the contact with centres in 2021}
+androstenedione_unit_discrepancy <- 
+  subset(ar_labs_to_widen_with_units_androstenedione_only, 
+         !is.na(units))
+
+androstenedione_unit_discrepancy <- 
+  subset(androstenedione_unit_discrepancy, 
+         !is.na(first_contact_androstenedione_units))
+
+androstenedione_unit_discrepancy$units_discrepancy <- 
+  ifelse(androstenedione_unit_discrepancy$units !=
+           androstenedione_unit_discrepancy$first_contact_androstenedione_units, 
+         1, 
+         0)
+```
+
+```{r, tidy up variable types in the ar_labs_to_widen_with_units frame}
+ar_labs_to_widen_with_units$marker <- 
+  as.character(ar_labs_to_widen_with_units$marker)
+
+ar_labs_to_widen_with_units$result <- 
+  as.character(ar_labs_to_widen_with_units$result)
+
+ar_labs_to_widen_with_units$raw_lab_entry <- 
+  ar_labs_to_widen_with_units$value
+
+ar_labs_to_widen_with_units$labs_centre_name <- 
+  as.character(ar_labs_to_widen_with_units$labs_centre_name)
+
+ar_labs_to_widen_with_units$units_to_use <- 
+  as.character(ar_labs_to_widen_with_units$units_to_use)
+```
+
+now before we work this frame, we want to create a version of it that just has the important columns and none of the working columns
+```{r, assess our frequencies of units - recreate individual frames to be able to assess after all manual corrections}
+#use the ar_labs_to_widen_with_units frame that has all of the columns still
+long_17OHP_only <-
+  subset(ar_labs_to_widen_with_units, marker=="ohp17")
+long_androstenedione_only <-
+  subset(ar_labs_to_widen_with_units, marker=="andostenedione")
+long_renin_only <-
+  subset(ar_labs_to_widen_with_units, marker=="renin")
+long_plasma_renin_activity_only <-
+  subset(ar_labs_to_widen_with_units, marker=="plasma_renin_activity")
+
+freq(long_17OHP_only$units_to_use)
+freq(long_androstenedione_only$units_to_use)
+freq(long_renin_only$units_to_use)
+freq(long_plasma_renin_activity_only$units_to_use)
+
+freq(long_plasma_renin_activity_only$labs_centre_name)
+
+sum(is.na(long_17OHP_only$value_number))
+sum(is.na(long_androstenedione_only$value_number))
+sum(is.na(long_renin_only$value_number))
+sum(is.na(long_plasma_renin_activity_only$value_number))
+
+long_17OHP_only_complete <- 
+  subset(long_17OHP_only, is.na(value_number))
+long_androstenedione_only_complete <- 
+  subset(long_androstenedione_only, is.na(value_number))
+long_renin_only_complete <- 
+  subset(long_renin_only, is.na(value_number))
+long_plasma_renin_activity_only_complete <- 
+  subset(long_plasma_renin_activity_only, is.na(value_number))
+```
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+rm(ar_labs_to_widen)
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_5")
+
+Sys.time()
+```

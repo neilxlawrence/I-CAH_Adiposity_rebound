@@ -1,0 +1,2300 @@
+Load packages and reread files using the prebuilt load files function
+
+```{r, load software packages}
+rm(list = ls())
+
+#we first establish the location of the working directory where we keep everything, depending on whether it exists (i.e. which computer we are using)
+#check C drive
+#take the working directory otherwise, which should work every time
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- getwd()
+}
+
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+#we load the ar_participants just to compare dates of visits
+load_ar_files_function(previous_file_name = "file_5",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_labs_to_widen_with_units"))
+```
+
+```{r, define our lower levels of detection}
+#here we define lower levels of detection to prevent trying to log transform values of zero
+#note our lower level of detection is defined in nmol/l for 17OHP and androstenedione and in nmol/l and renin in µIU/ml
+#we define different variables here, that can have different lower levels of detection if you want, or can all be defined as the same
+#note that these three variables are also saved for use after imputation to ensure consistency of analysis in later files by reloading instead of redefining
+lower_level_of_detection_17ohp_nmol_l <-
+  lower_level_of_detection_androstenedione_nmol_l <-
+  lower_level_of_detection_renin_µIU_ml <-
+  0.05
+
+upper_level_of_detection_17ohp_nmol_l <- 1000
+
+upper_level_of_detection_androstenedione_nmol_l <- 100
+
+upper_level_of_detection_renin_µIU_ml <- 1000
+
+#log transform them here as well
+ln_lower_level_of_detection_17ohp_nmol_l <-
+  log(lower_level_of_detection_17ohp_nmol_l)
+
+ln_lower_level_of_detection_androstenedione_nmol_l <-
+  log(lower_level_of_detection_androstenedione_nmol_l)
+
+ln_lower_level_of_detection_renin_µIU_ml <-
+  log(lower_level_of_detection_renin_µIU_ml)
+
+ln_upper_level_of_detection_17ohp_nmol_l <-
+  log(upper_level_of_detection_17ohp_nmol_l)
+
+ln_upper_level_of_detection_androstenedione_nmol_l <-
+  log(upper_level_of_detection_androstenedione_nmol_l)
+
+ln_upper_level_of_detection_renin_µIU_ml <-
+  log(upper_level_of_detection_renin_µIU_ml)
+```
+
+```{r, assign integers for variables at the top as you need integers for categorical MICE imputation and then assign conversion factors}
+#we want to assign variables so we can refer to integers well, and refer to them several times without the danger of defining them differently
+
+#target unit conversions
+
+#17OHP nmol/l or maybe ng/ml
+
+#androstenedione nmol/l or maybe ng/ml
+
+#renin µIU/ml or maybe ng/l
+
+#plasma renin activity nmol/l/hr or maybe ng/ml/hr
+
+#the first of those would be the more british, so let's convert to that
+
+integer_for_nmol_l <- 1
+
+integer_for_ng_dl <- 2
+
+integer_for_ng_ml <- 3
+
+integer_for_µIU_ml <- 4
+
+#please note all pg_ml for renin was changed to ng/l because it is exactly the same number
+
+integer_for_ng_l <- 5
+
+integer_for_fmol_l_s <- 6
+
+integer_for_ng_ml_hr <- 7
+
+integer_for_nmol_l_hr <- 8
+
+convert_17OHP_nmol_l_to_nmol_l <- 1
+
+convert_17OHP_ng_dl_to_nmol_l <- 0.030261  
+
+convert_17OHP_ng_ml_to_nmol_l <- 3.0261
+
+
+convert_androstenedione_nmol_l_to_nmol_l <- 1
+
+convert_androstenedione_ng_dl_to_nmol_l <- 0.034916  
+
+convert_androstenedione_ng_ml_to_nmol_l <- 3.4916
+
+#renin conversion taken from 'Ratio of serum aldosterone to plasma renin concentration in essential hypertension and primary aldosteronism' DOI: 10.1055/s-2002-23491 Trenkel et al 2002
+#this is also referenced in the paper https://www.sciencedirect.com/science/article/pii/S0735109710008661#:~:text=The%20conversion%20factor%20for%20PRC,pg%2Fml%20in%20supine%20position.
+
+convert_renin_µIU_ml_to_µIU_ml <- 1
+
+convert_renin_ng_l_to_µIU_ml <- 1.67
+
+#then define conversion factors for pra
+
+#this paper has a talbe https://onlinelibrary.wiley.com/doi/pdf/10.1111/j.1939-1676.2004.tb02597.x
+  #that table converts fmol/l/s to ng/ml/h by multiplying by 0.004666
+#so to convert ng/ml/hr to fmol/l/s we multiple by the reciprocal i.e. 214.316
+
+#simple maths gives us fmol/l/s x 60 x 60 x10-6 to get to nmol/l/hr so overall multiply by 0.0036
+
+#therefore to convert ng/ml/hr to nmol/l/hr we convert to fmol/l/s then convert to nmol/l/hr, so we multiply ng/ml/hr by 214.316 then multiply by 0.0036, so our overall ng/ml/r to nmol/l/hr is to multiple by 0.77154
+
+convert_plasma_renin_activity_nmol_l_hr_to_nmol_l_hr <- 1
+
+convert_plasma_renin_activity_ng_ml_hr_to_nmol_l_hr <- 0.77154
+  
+convert_plasma_renin_activity_fmol_l_s_to_nmol_l_hr <- 0.0036
+
+#we also want to (perhaps) be able to convert plasma renin activity to plasma renin. Plasma_renin_activity that PRA (ng/mL/h) to DRC (mU/L) is 8.2 referencing https://www.endocrine.org/clinical-practice-guidelines/primary-aldosteronism . We use 8.2 and have calculated others around that from the conversions above
+
+#this reference quotes 7.6: https://wardelab.com/warde-reports/test-update-renin-and-aldosterone-renin-ratio/#:~:text=There%20is%20no%20precise%20conversion,(range%205.5%20to%209.7).
+
+convert_plasma_renin_activity_ng_ml_hr_to_renin_µIU_ml <- 0.12195 #this is the index number, converting renin to pra by multiplying by 8.2, the reciprocal being 0.12195
+
+convert_plasma_renin_activity_nmol_l_hr_to_renin_µIU_ml <- 0.158 #we calculate this by convering nmol/l/hr to ng/ml/hr by multiplying by 1/0.77154 = 1.296 than multiplying by the index value of 0.12195. 1.296*0.12195
+  
+convert_plasma_renin_activity_fmol_l_s_to_renin_µIU_ml <- 0.000569 #we calculate this by converting fmol/l/s to to nmol/l/hr by multiplying by 0.0036 then converting to renin with our derived factor 0.158 = 0.0036*0.158 = 0.000569
+  
+```
+
+```{r, take out each marker individually}
+long_17OHP_only <-
+  subset(ar_labs_to_widen_with_units, marker=="ohp17")
+freq(long_17OHP_only$units_to_use)
+
+long_androstenedione_only <-
+  subset(ar_labs_to_widen_with_units, marker=="andostenedione")
+freq(long_androstenedione_only$units_to_use)
+
+long_renin_only <-
+  subset(ar_labs_to_widen_with_units, marker=="renin")
+freq(long_renin_only$units_to_use)
+
+long_plasma_renin_activity_only <-
+  subset(ar_labs_to_widen_with_units, marker=="plasma_renin_activity")
+freq(long_plasma_renin_activity_only$units_to_use)
+
+```
+
+```{r, take out columns to use for imputation}
+long_17OHP_to_impute_units <-
+  long_17OHP_only[,c(
+    "id_visit_date",
+    "value_number",
+    "labs_centre_name",
+    "units_to_use"
+  )]
+
+long_androstenedione_to_impute_units <-
+  long_androstenedione_only[,c(
+    "id_visit_date",
+    "value_number",
+    "labs_centre_name",
+    "units_to_use"
+  )]
+
+long_renin_to_impute_units <-
+  long_renin_only[,c(
+    "id_visit_date",
+    "value_number",
+    "labs_centre_name",
+    "units_to_use"
+  )]
+
+long_plasma_renin_activity_to_impute_units <-
+  long_plasma_renin_activity_only[,c(
+    "id_visit_date",
+    "value_number",
+    "labs_centre_name",
+    "units_to_use"
+  )]
+
+long_17OHP_to_impute_units_missing_only <-
+  subset(long_17OHP_to_impute_units, 
+         units_to_use=="missing")
+
+long_androstenedione_to_impute_units_missing_only <-
+  subset(long_androstenedione_to_impute_units, 
+         units_to_use=="missing")
+
+descr(long_17OHP_to_impute_units_missing_only$value_number)
+
+descr(log(long_17OHP_to_impute_units_missing_only$value_number))
+
+long_17OHP_to_impute_units$units_to_use <-
+  ifelse(long_17OHP_to_impute_units$units_to_use=="missing",
+         NA,
+         long_17OHP_to_impute_units$units_to_use)
+
+descr(long_17OHP_to_impute_units)
+
+print("Within the frame long_17OHP_to_impute_units we simply have a level 1 variable, a level 2 variable and a level 3 variable. We want to impute the level 3 variable")
+```
+
+```{r}
+summary_17ohp_without_units <- 
+  long_17OHP_to_impute_units_missing_only %>% 
+    group_by(labs_centre_name) %>%
+    dplyr::summarise(count_17ohp = length(value_number),
+                     Mean_17ohp  = mean(value_number, na.rm=T),
+                     SD_17ohp    = sd(value_number, na.rm=T)
+)
+
+summary_androstenedione_without_units <- 
+  long_androstenedione_to_impute_units_missing_only %>% 
+    group_by(labs_centre_name) %>%
+    dplyr::summarise(count_androstenedione = length(value_number),
+                     Mean_androstenedione  = mean(value_number, na.rm=T),
+                     SD_androstenedione    = sd(value_number, na.rm=T)
+)
+
+ghent <- subset(long_17OHP_to_impute_units_missing_only, labs_centre_name=="Ghent")
+
+summary_no_units <-
+  full_join(
+    summary_17ohp_without_units,
+    summary_androstenedione_without_units
+  )
+
+write.csv(summary_no_units, "summary_no_units.csv")
+```
+
+
+
+```{r, impute missing 17OHP units}
+# Data preparation
+data <- 
+  long_17OHP_to_impute_units
+
+# Handling different units - give each unit a specific integer
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "nmol/l", 
+         integer_for_nmol_l, 
+         NA)
+
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "ng/dl", 
+         integer_for_ng_dl, 
+         data$units_to_impute)
+
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "ng/ml", 
+         integer_for_ng_ml, 
+         data$units_to_impute)
+
+# Convert character columns to factors or integers to allow MICE to function
+data$units_to_impute <- 
+  as.integer(data$units_to_impute)
+
+data$labs_centre_name <- 
+  as.factor(data$labs_centre_name)
+
+data$labs_centre_integer <- 
+  as.integer(data$labs_centre_name)
+
+labs_centre_key <-
+  unique(
+    data.frame(
+    centre_integer=data$labs_centre_integer,
+    centre_name=data$labs_centre_name
+  ))
+
+id_visit_date_key <-
+  (
+    data.frame(
+    id_visit_date=data$id_visit_date,
+    manually_adjusted_value_number=data$value_number
+  ))
+  
+data$units_to_use <- NULL
+  
+data$id_visit_date <- NULL
+
+data$labs_centre_name <- NULL
+
+# Ensure the class variables are correctly identified
+#data$centre <- data$labs_centre_integer  # Assuming labs_centre_integer is the class variable
+#data$centre <- NULL
+
+# Create a predictor matrix and specify methods for multilevel imputation
+pred <- 
+  make.predictorMatrix(data)
+
+#create a method matrix that we can then adjust
+method <- 
+  make.method(data)
+
+#adjust our method matrix
+method["value_number"] <- "pmm"  # Multilevel imputation for continuous variable
+
+method["labs_centre_integer"] <- ""  # No imputation for class variable
+
+method["units_to_impute"] <- "pmm"
+
+#method["units_to_impute"] <- "2lonly.mean"  # Use 2lonly.mean to handle partially missing level-2 data - problem is this doesn't impute values for my level 3!
+
+# Adjust the predictor matrix
+pred["value_number", "value_number"] <- 1
+pred["value_number", "units_to_impute"] <- -2
+pred["value_number", "labs_centre_integer"] <- -2  # Indicates clustering variable
+pred["units_to_impute", "value_number"] <- 1
+pred["units_to_impute", "units_to_impute"] <- -2
+pred["units_to_impute", "labs_centre_integer"] <- -2  # Indicates clustering variable
+pred["labs_centre_integer", "value_number"] <- 1
+pred["labs_centre_integer", "units_to_impute"] <- -2
+pred["labs_centre_integer", "labs_centre_integer"] <- -2
+#create a matrix plot of our predictor matrix
+#edarf::#plot_pred(pred)
+
+# Set up levels_id
+levels_id <- list(
+#  value_number = NULL,  # Individual level (Level 1)
+  labs_centre_integer = "labs_centre_integer",  # Class level (Level 2)
+  units_to_impute = "units_to_impute"  # School level (Level 3)
+)
+
+#setup variables_level
+variables_level <- character(ncol(data))
+names(variables_level) <- colnames(data)
+variables_level["labs_centre_integer"] <- "labs_centre_integer"
+variables_level["units_to_impute"] <- "units_to_impute"
+
+# Perform multilevel imputation
+number_of_imputations <- 10
+imputed_data <- 
+  mice(data, 
+       method = method, 
+       predictorMatrix = pred, 
+       m = number_of_imputations, 
+       maxit = 20,
+#       levels_id = levels_id,
+#       variables_level = variables_level,
+#       donors = 5, 
+#       incluster = TRUE,
+       seed = 500) # increasing the donors has allowed the lesser category to be selected, but its no longer abiding perfectly by the hierarchy
+
+# View the imputed datasets in long format
+unit_imputations_17OHP_long <- 
+  complete(imputed_data, 
+           action = "long", 
+           include = TRUE)
+
+unit_imputations_17OHP_long_with_id_visit_date <-
+  cbind(
+    id_visit_date_key,
+    unit_imputations_17OHP_long
+    )
+
+#check our values are the same
+unit_imputations_17OHP_long_with_id_visit_date$alert_difference <-
+  ifelse(unit_imputations_17OHP_long_with_id_visit_date$manually_adjusted_value_number!=
+           unit_imputations_17OHP_long_with_id_visit_date$value_number, 
+         1, 
+         0)
+
+print("The following number has to be zero, otherwise the cbind has somehow staggered and should be reviewed:")
+max(unit_imputations_17OHP_long_with_id_visit_date$alert_difference, na.rm=T)
+
+#remove workings columns
+unit_imputations_17OHP_long_with_id_visit_date$value_number <- NULL
+unit_imputations_17OHP_long_with_id_visit_date$alert_difference <- NULL
+
+unit_imputations_17OHP_long_with_centre_key <-
+  left_join(
+    unit_imputations_17OHP_long,
+    labs_centre_key,
+    by=(c("labs_centre_integer"= "centre_integer"))
+  )
+
+#now get rid of the labs_centre_integer
+unit_imputations_17OHP_long_with_centre_key$labs_centre_integer <- NULL
+
+#re enter the units that correspond to each of the units to impute
+unit_imputations_17OHP_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_17OHP_long_with_centre_key$units_to_impute==integer_for_nmol_l ,
+           "nmol/l",
+           NA)
+unit_imputations_17OHP_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_17OHP_long_with_centre_key$units_to_impute==integer_for_ng_dl ,
+           "ng/dl",
+           unit_imputations_17OHP_long_with_centre_key$units_imputed)
+unit_imputations_17OHP_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_17OHP_long_with_centre_key$units_to_impute==integer_for_ng_ml ,
+           "ng/ml",
+           unit_imputations_17OHP_long_with_centre_key$units_imputed)
+
+#now get rid of the units_to_impute integer
+unit_imputations_17OHP_long_with_centre_key$units_to_impute <- NULL
+```
+
+```{r, reshape 17OHP to wide}
+# Reshape unit_imputations_17OHP_long to wide format
+unit_imputations_17OHP_wide <- 
+  unit_imputations_17OHP_long_with_centre_key %>%
+  pivot_wider(names_from = .imp, values_from = -c(.id, .imp))
+
+print("Ensure this number is always zero so we know we are inserting the correct id_visit_date_key")
+nrow(id_visit_date_key) - nrow(unit_imputations_17OHP_wide)
+
+#create a centre_name then remove every column that contains centre_name_ as we aren't imputing centres, we're imputing units
+unit_imputations_17OHP_wide$centre_name <- 
+  unit_imputations_17OHP_wide$centre_name_0
+
+unit_imputations_17OHP_wide$value_number <- 
+  unit_imputations_17OHP_wide$value_number_0
+
+#we bind back in our id_visit_date, because we didn't have it included for the imputation
+unit_imputations_17OHP_wide_with_id_visit_date_key <-
+  cbind(unit_imputations_17OHP_wide,
+        id_visit_date_key)
+
+cols_to_remove <- 
+  grep("centre_name_|value_number_", 
+       names(unit_imputations_17OHP_wide_with_id_visit_date_key))
+
+unit_imputations_17OHP_wide_with_id_visit_date_key <- 
+  unit_imputations_17OHP_wide_with_id_visit_date_key[, -cols_to_remove]
+
+#we can get rid of the imputation id column because we have our own
+unit_imputations_17OHP_wide_with_id_visit_date_key$.id <- NULL
+
+
+#check our values are the same
+unit_imputations_17OHP_wide_with_id_visit_date_key$alert_difference <-
+  ifelse(unit_imputations_17OHP_wide_with_id_visit_date_key$manually_adjusted_value_number!=
+           unit_imputations_17OHP_wide_with_id_visit_date_key$value_number, 
+         1, 
+         0)
+print("The following number has to be zero, otherwise the cbind has somehow staggered and should be reviewed:")
+max(unit_imputations_17OHP_wide_with_id_visit_date_key$alert_difference, na.rm=T)
+
+#remove workings columns
+unit_imputations_17OHP_wide_with_id_visit_date_key$value_number <- NULL
+unit_imputations_17OHP_wide_with_id_visit_date_key$alert_difference <- NULL
+
+unit_imputations_17OHP_wide_imputed <- 
+  subset(unit_imputations_17OHP_wide_with_id_visit_date_key, is.na(units_imputed_0))
+
+print("Check our lower limit of detection:")
+descr(unit_imputations_17OHP_wide_imputed$manually_adjusted_value_number)
+```
+
+```{r, plot imputed 17OHP units}
+for (each_imputation in 1:number_of_imputations) {
+  
+  converted_column_name <- 
+    paste0("units_imputed_", each_imputation)
+
+  #then rename the converted column
+  names(unit_imputations_17OHP_wide)[names(unit_imputations_17OHP_wide)=="converted_column"] <- 
+    converted_column_name
+}
+
+#create an overall plot to be able to compare to that has all of the values across the entire dataset
+overall_17OHP_units_plot <-
+  ggplot(data=subset(long_17OHP_to_impute_units), 
+         aes(x=value_number),
+         alpha=0.5) + 
+  geom_density(aes(fill=units_to_use),
+         alpha=0.5) + 
+  scale_fill_manual(values = c("ng/dl"="blue", 
+                               "ng/ml"="red", 
+                               "nmol/l"="darkgreen", 
+                               "missing"="black")) + 
+  labs(title="Overall distribution of 17OHP values",
+  y="Density") + 
+  xlim(-4,10) +
+  themewithlegend 
+
+#loop round each centre
+for (each_centre in unique(unit_imputations_17OHP_wide$centre_name)) {
+  print(each_centre)
+
+  centre_data_long <- 
+    subset(unit_imputations_17OHP_long_with_centre_key, centre_name==each_centre)
+  
+  centre_data_long_original <-
+    subset(centre_data_long, .imp==0)
+  
+  centre_data_wide <- 
+    subset(unit_imputations_17OHP_wide, centre_name==each_centre)
+  
+  cat("rows of missing data:")
+  
+  print(sum(is.na(centre_data_wide$units_imputed_0)))
+  
+  frequency_frame <- 
+    subset(
+      rownames_to_column(as.data.frame(freq(centre_data_long$units_imputed)), var="units"), 
+           units!="Total" & units!="<NA>")
+  
+  highest_frequency_frame <-
+    frequency_frame %>%
+    slice_max(Freq, n=1, with_ties = F)
+  
+  highest_frequency_marker <- 
+    highest_frequency_frame[,"units"]
+  
+      
+  highest_frequency_colour <-
+    ifelse(nrow(highest_frequency_frame)==0,
+         "black",
+         NA)  
+  
+  highest_frequency_marker <-
+    ifelse(nrow(highest_frequency_frame)==0,
+         "black",
+         NA)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/dl",
+           "blue",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/ml",
+           "red",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="nmol/l",
+           "darkgreen",
+           highest_frequency_colour)
+  
+  
+  frequency_bar_plot <-
+    ggplot(frequency_frame, aes(x = units, y = Freq)) +
+  geom_bar(stat = "identity", aes(fill=units)) +
+  scale_fill_manual(
+    values = c("ng/dl"="blue", 
+               "ng/ml"="red", 
+               "nmol/l"="darkgreen", 
+               "missing"="black")) + 
+  labs(x = "Frequency", 
+       y = NULL, 
+       title = "Frequency of each unit across imputations") +
+    coord_flip() +
+  themepowerpoint
+  
+  #take out the percentage of data with missing units to use in the title of the plot
+  percentage_of_data_missing_units <-
+    round(100 * sum(is.na(centre_data_long_original$units_imputed)) / 
+      (sum(!is.na(centre_data_long_original$units_imputed)) + 
+         sum(is.na(centre_data_long_original$units_imputed))))
+  #correct for 0 to prevent 0 divided by 0 being NAN
+  percentage_of_data_missing_units <-
+    ifelse(sum(!is.na(centre_data_long_original$units_imputed)) + 
+         sum(is.na(centre_data_long_original$units_imputed))==0,
+         100,
+         percentage_of_data_missing_units)
+  
+  #give me a density plot of that centres values
+  centre_specific_17OHP_plot <-
+    ggplot(data=subset(centre_data_long
+                     ), 
+         aes(x=value_number),
+         alpha=0.5) + 
+  geom_density(aes(), fill=highest_frequency_colour,
+         alpha=0.5) + 
+  labs(title=paste0(
+    "Percentage data with missing units: ",
+    percentage_of_data_missing_units,
+    "% from ",
+    each_centre),  
+    subtitle=paste0("n=", length(centre_data_long_original$units_imputed)),
+    y="Density") + 
+  xlim(-4,10) +
+  themewithlegend 
+
+  grid_plot <-
+    grid.arrange(overall_17OHP_units_plot, centre_specific_17OHP_plot, frequency_bar_plot, ncol=1)
+  
+  dir.create("plots_of_categorical_imputation_17OHP")
+  
+  ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_17OHP", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  
+  #put it in a sub folder if there are some imputed values
+  if(sum(is.na(centre_data_long_original$units_imputed))>0){
+  dir.create("plots_of_categorical_imputation_17OHP/with_imputed_values")
+    ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_17OHP/with_imputed_values", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  }
+  #put it in a different sub folder if there are no imputed values
+  if(sum(is.na(centre_data_long_original$units_imputed))==0){
+  dir.create("plots_of_categorical_imputation_17OHP/without_imputed_values")
+    ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_17OHP/without_imputed_values", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  }
+}
+
+```
+
+
+*********************************************************************
+Androstenedione
+*********************************************************************
+
+```{r, impute missing androstenedione units}
+# Data preparation
+data <- 
+  long_androstenedione_to_impute_units
+
+#we want to assign variables so we can refer to integers well, and refer to them several times without the danger of defining them differently
+
+# Handling different units - give each unit a specific integer
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "nmol/l", integer_for_nmol_l, NA)
+
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "ng/dl", integer_for_ng_dl, data$units_to_impute)
+
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "ng/ml", integer_for_ng_ml, data$units_to_impute)
+
+# Convert character columns to factors or integers to allow MICE to function
+data$units_to_impute <- 
+  as.integer(data$units_to_impute)
+
+data$labs_centre_name <- 
+  as.factor(data$labs_centre_name)
+
+data$labs_centre_integer <- 
+  as.integer(data$labs_centre_name)
+
+labs_centre_key <-
+  unique(
+    data.frame(
+    centre_integer=data$labs_centre_integer,
+    centre_name=data$labs_centre_name
+  ))
+
+id_visit_date_key <-
+  (
+    data.frame(
+    id_visit_date=data$id_visit_date,
+    manually_adjusted_value_number=data$value_number
+  ))
+  
+data$units_to_use <- NULL
+  
+data$id_visit_date <- NULL
+
+data$labs_centre_name <- NULL
+
+# Ensure the class variables are correctly identified
+#data$centre <- data$labs_centre_integer  # Assuming labs_centre_integer is the class variable
+#data$centre <- NULL
+
+# Create a predictor matrix and specify methods for multilevel imputation
+pred <- 
+  make.predictorMatrix(data)
+
+#create a method matrix that we can then adjust
+method <- 
+  make.method(data)
+
+#adjust our method matrix
+method["value_number"] <- "pmm"  # Multilevel imputation for continuous variable
+
+method["labs_centre_integer"] <- ""  # No imputation for class variable
+
+method["units_to_impute"] <- "pmm"
+
+#method["units_to_impute"] <- "2lonly.mean"  # Use 2lonly.mean to handle partially missing level-2 data - problem is this doesn't impute values for my level 3!
+
+# Adjust the predictor matrix
+pred["value_number", "value_number"] <- 1
+pred["value_number", "units_to_impute"] <- -2
+pred["value_number", "labs_centre_integer"] <- -2  # Indicates clustering variable
+pred["units_to_impute", "value_number"] <- 1
+pred["units_to_impute", "units_to_impute"] <- -2
+pred["units_to_impute", "labs_centre_integer"] <- -2  # Indicates clustering variable
+pred["labs_centre_integer", "value_number"] <- 1
+pred["labs_centre_integer", "units_to_impute"] <- -2
+pred["labs_centre_integer", "labs_centre_integer"] <- -2
+#create a matrix plot of our predictor matrix
+##plot_pred(pred)
+
+# Set up levels_id
+levels_id <- list(
+#  value_number = NULL,  # Individual level (Level 1)
+  labs_centre_integer = "labs_centre_integer",  # Class level (Level 2)
+  units_to_impute = "units_to_impute"  # School level (Level 3)
+)
+
+#setup variables_level
+variables_level <- character(ncol(data))
+names(variables_level) <- colnames(data)
+variables_level["labs_centre_integer"] <- "labs_centre_integer"
+variables_level["units_to_impute"] <- "units_to_impute"
+
+# Perform multilevel imputation
+number_of_imputations <- 10
+imputed_data <- 
+  mice(data, 
+       method = method, 
+       predictorMatrix = pred, 
+       m = number_of_imputations, 
+       maxit = 20,
+#       levels_id = levels_id,
+#       variables_level = variables_level,
+#       donors = 5, 
+#       incluster = TRUE,
+       seed = 500) # increasing the donors has allowed the lesser category to be selected, but its no longer abiding perfectly by the hierarchy
+
+# View the imputed datasets in long format
+unit_imputations_androstenedione_long <- 
+  complete(imputed_data, 
+           action = "long", 
+           include = TRUE)
+
+unit_imputations_androstenedione_long_with_id_visit_date <-
+  cbind(
+    id_visit_date_key,
+    unit_imputations_androstenedione_long
+    )
+
+#check our values are the same
+unit_imputations_androstenedione_long_with_id_visit_date$alert_difference <-
+  ifelse(unit_imputations_androstenedione_long_with_id_visit_date$manually_adjusted_value_number!=
+           unit_imputations_androstenedione_long_with_id_visit_date$value_number, 
+         1, 
+         0)
+
+print("The following number has to be zero, otherwise the cbind has somehow staggered and should be reviewed:")
+
+max(unit_imputations_androstenedione_long_with_id_visit_date$alert_difference, na.rm=T)
+
+#remove workings columns
+unit_imputations_androstenedione_long_with_id_visit_date$value_number <- NULL
+unit_imputations_androstenedione_long_with_id_visit_date$alert_difference <- NULL
+
+unit_imputations_androstenedione_long_with_centre_key <-
+  left_join(
+    unit_imputations_androstenedione_long,
+    labs_centre_key,
+    by=(c("labs_centre_integer"= "centre_integer"))
+  )
+
+#now get rid of the labs_centre_integer
+unit_imputations_androstenedione_long_with_centre_key$labs_centre_integer <- NULL
+
+#re enter the units that correspond to each of the units to impute
+unit_imputations_androstenedione_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_androstenedione_long_with_centre_key$units_to_impute==integer_for_nmol_l ,
+           "nmol/l",
+           NA)
+unit_imputations_androstenedione_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_androstenedione_long_with_centre_key$units_to_impute==integer_for_ng_dl ,
+           "ng/dl",
+           unit_imputations_androstenedione_long_with_centre_key$units_imputed)
+unit_imputations_androstenedione_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_androstenedione_long_with_centre_key$units_to_impute==integer_for_ng_ml ,
+           "ng/ml",
+           unit_imputations_androstenedione_long_with_centre_key$units_imputed)
+
+#now get rid of the units_to_impute integer
+unit_imputations_androstenedione_long_with_centre_key$units_to_impute <- NULL
+```
+
+```{r, reshape androstenedione to wide}
+# Reshape unit_imputations_androstenedione_long to wide format
+unit_imputations_androstenedione_wide <- 
+  unit_imputations_androstenedione_long_with_centre_key %>%
+  pivot_wider(names_from = .imp, values_from = -c(.id, .imp))
+
+print("Ensure this number is always zero so we know we are inserting the correct id_visit_date_key")
+nrow(id_visit_date_key) - nrow(unit_imputations_androstenedione_wide)
+
+#create a centre_name then remove every column that contains centre_name_ as we aren't imputing centres, we're imputing units
+unit_imputations_androstenedione_wide$centre_name <- 
+  unit_imputations_androstenedione_wide$centre_name_0
+
+unit_imputations_androstenedione_wide$value_number <- 
+  unit_imputations_androstenedione_wide$value_number_0
+
+#we bind back in our id_visit_date, because we didn't have it included for the imputation
+unit_imputations_androstenedione_wide_with_id_visit_date_key <-
+  cbind(unit_imputations_androstenedione_wide,
+        id_visit_date_key)
+
+cols_to_remove <- 
+  grep("centre_name_|value_number_", 
+       names(unit_imputations_androstenedione_wide_with_id_visit_date_key))
+
+unit_imputations_androstenedione_wide_with_id_visit_date_key <- 
+  unit_imputations_androstenedione_wide_with_id_visit_date_key[, -cols_to_remove]
+
+#we can get rid of the imputation id column because we have our own
+unit_imputations_androstenedione_wide_with_id_visit_date_key$.id <- NULL
+
+
+#check our values are the same
+unit_imputations_androstenedione_wide_with_id_visit_date_key$alert_difference <-
+  ifelse(unit_imputations_androstenedione_wide_with_id_visit_date_key$manually_adjusted_value_number!=
+           unit_imputations_androstenedione_wide_with_id_visit_date_key$value_number, 
+         1, 
+         0)
+print("The following number has to be zero, otherwise the cbind has somehow staggered and should be reviewed:")
+max(unit_imputations_androstenedione_wide_with_id_visit_date_key$alert_difference, na.rm=T)
+
+#remove workings columns
+unit_imputations_androstenedione_wide_with_id_visit_date_key$value_number <- NULL
+unit_imputations_androstenedione_wide_with_id_visit_date_key$alert_difference <- NULL
+
+
+unit_imputations_androstenedione_wide_imputed <- 
+  subset(unit_imputations_androstenedione_wide_with_id_visit_date_key, is.na(units_imputed_0))
+```
+
+```{r, plot imputed androstenedione units}
+for (each_imputation in 1:number_of_imputations) {
+  
+  converted_column_name <- 
+    paste0("units_imputed_", each_imputation)
+
+  #then rename the converted column
+  names(unit_imputations_androstenedione_wide)[names(unit_imputations_androstenedione_wide)=="converted_column"] <- 
+    converted_column_name
+}
+
+#create an overall plot to be able to compare to that has all of the values across the entire dataset
+overall_androstenedione_units_plot <-
+  ggplot(data=subset(long_androstenedione_to_impute_units), 
+         aes(x=value_number),
+         alpha=0.5) + 
+  geom_density(aes(fill=units_to_use),
+         alpha=0.5) + 
+  scale_fill_manual(values = c("ng/dl"="blue", 
+                               "ng/ml"="red", 
+                               "nmol/l"="darkgreen", 
+                               "missing"="black")) + 
+  labs(title="Overall distribution of androstenedione values",
+  y="Density") + 
+  xlim(-4,10) +
+  themewithlegend 
+
+#loop round each centre
+for (each_centre in unique(unit_imputations_androstenedione_wide$centre_name)) {
+  print(each_centre)
+
+  centre_data_long <- 
+    subset(unit_imputations_androstenedione_long_with_centre_key, centre_name==each_centre)
+  
+  centre_data_long_original <-
+    subset(centre_data_long, .imp==0)
+  
+  centre_data_wide <- 
+    subset(unit_imputations_androstenedione_wide, centre_name==each_centre)
+  
+  cat("rows of missing data:")
+  
+  print(sum(is.na(centre_data_wide$units_imputed_0)))
+  
+  frequency_frame <- 
+    subset(
+      rownames_to_column(as.data.frame(freq(centre_data_long$units_imputed)), var="units"), 
+           units!="Total" & units!="<NA>")
+  
+  highest_frequency_frame <-
+    frequency_frame %>%
+    slice_max(Freq, n=1, with_ties = F)
+  
+  highest_frequency_marker <- 
+    highest_frequency_frame[,"units"]
+  
+      
+  highest_frequency_colour <-
+    ifelse(nrow(highest_frequency_frame)==0,
+         "black",
+         NA)  
+  
+  highest_frequency_marker <-
+    ifelse(nrow(highest_frequency_frame)==0,
+         "black",
+         NA)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/dl",
+           "blue",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/ml",
+           "red",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="nmol/l",
+           "darkgreen",
+           highest_frequency_colour)
+  
+  
+  frequency_bar_plot <-
+    ggplot(frequency_frame, aes(x = units, y = Freq)) +
+  geom_bar(stat = "identity", aes(fill=units)) +
+  scale_fill_manual(
+    values = c("ng/dl"="blue", 
+               "ng/ml"="red", 
+               "nmol/l"="darkgreen", 
+               "missing"="black")) + 
+  labs(x = "Frequency", 
+       y = NULL, 
+       title = "Frequency of each unit across imputations") +
+    coord_flip() +
+  themepowerpoint
+    
+  #take out the percentage of data with missing units to use in the title of the plot
+  percentage_of_data_missing_units <-
+    round(100 * sum(is.na(centre_data_long_original$units_imputed)) / 
+      (sum(!is.na(centre_data_long_original$units_imputed)) + 
+         sum(is.na(centre_data_long_original$units_imputed))))
+
+    #correct for 0 to prevent 0 divided by 0 being NAN
+  percentage_of_data_missing_units <-
+    ifelse(sum(!is.na(centre_data_long_original$units_imputed)) + 
+         sum(is.na(centre_data_long_original$units_imputed))==0,
+         100,
+         percentage_of_data_missing_units)
+  
+  #give me a density plot of that centres values
+  centre_specific_androstenedione_plot <-
+    ggplot(data=subset(centre_data_long
+                     ), 
+         aes(x=value_number),
+         alpha=0.5) + 
+  geom_density(aes(), fill=highest_frequency_colour,
+         alpha=0.5) + 
+  labs(title=paste0(
+    "Percentage data with missing units: ",
+    percentage_of_data_missing_units,
+    "% from ",
+    each_centre),  
+    subtitle=paste0("n=", length(centre_data_long_original$units_imputed)),
+    y="Density") + 
+  xlim(-4,10) +
+  themewithlegend 
+
+  grid_plot <-
+    grid.arrange(overall_androstenedione_units_plot, centre_specific_androstenedione_plot, frequency_bar_plot, ncol=1)
+  
+  dir.create("plots_of_categorical_imputation_androstenedione")
+  
+  ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_androstenedione", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  
+  #put it in a sub folder if there are some imputed values
+  if(sum(is.na(centre_data_long_original$units_imputed))>0){
+  dir.create("plots_of_categorical_imputation_androstenedione/with_imputed_values")
+    ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_androstenedione/with_imputed_values", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  }
+  #put it in a different sub folder if there are no imputed values
+  if(sum(is.na(centre_data_long_original$units_imputed))==0){
+  dir.create("plots_of_categorical_imputation_androstenedione/without_imputed_values")
+    ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_androstenedione/without_imputed_values", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  }
+}
+
+```
+
+*********************************************************************
+Renin
+*********************************************************************
+
+```{r, impute missing renin units}
+# Data preparation
+data <- 
+  long_renin_to_impute_units
+
+freq(data$units_to_use)
+# Handling different units - give each unit a specific integer
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "nmol/l", integer_for_nmol_l, NA)
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "ng/dl", integer_for_ng_dl, data$units_to_impute)
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "ng/ml", integer_for_ng_ml, data$units_to_impute)
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "µIU/ml", integer_for_µIU_ml, data$units_to_impute)
+data$units_to_impute <- 
+  ifelse(data$units_to_use == "ng/l", integer_for_ng_l, data$units_to_impute)
+
+# Convert character columns to factors or integers to allow MICE to function
+data$units_to_impute <- 
+  as.integer(data$units_to_impute)
+
+data$labs_centre_name <- 
+  as.factor(data$labs_centre_name)
+
+data$labs_centre_integer <- 
+  as.integer(data$labs_centre_name)
+
+labs_centre_key <-
+  unique(
+    data.frame(
+    centre_integer=data$labs_centre_integer,
+    centre_name=data$labs_centre_name
+  ))
+
+id_visit_date_key <-
+  (
+    data.frame(
+    id_visit_date=data$id_visit_date,
+    manually_adjusted_value_number=data$value_number
+  ))
+  
+data$units_to_use <- NULL
+  
+data$id_visit_date <- NULL
+
+data$labs_centre_name <- NULL
+
+# Create a predictor matrix and specify methods for multilevel imputation
+pred <- 
+  make.predictorMatrix(data)
+
+#create a method matrix that we can then adjust
+method <- 
+  make.method(data)
+
+#adjust our method matrix
+method["value_number"] <- "pmm"  # Multilevel imputation for continuous variable
+
+method["labs_centre_integer"] <- ""  # No imputation for class variable
+
+method["units_to_impute"] <- "pmm"
+
+#method["units_to_impute"] <- "2lonly.mean"  # Use 2lonly.mean to handle partially missing level-2 data - problem is this doesn't impute values for my level 3!
+
+# Adjust the predictor matrix
+pred["value_number", "value_number"] <- 1
+pred["value_number", "units_to_impute"] <- -2
+pred["value_number", "labs_centre_integer"] <- -2  # Indicates clustering variable
+pred["units_to_impute", "value_number"] <- 1
+pred["units_to_impute", "units_to_impute"] <- -2
+pred["units_to_impute", "labs_centre_integer"] <- -2  # Indicates clustering variable
+pred["labs_centre_integer", "value_number"] <- 1
+pred["labs_centre_integer", "units_to_impute"] <- -2
+pred["labs_centre_integer", "labs_centre_integer"] <- -2
+#create a matrix plot of our predictor matrix
+#plot_pred(pred)
+
+# Set up levels_id
+levels_id <- list(
+#  value_number = NULL,  # Individual level (Level 1)
+  labs_centre_integer = "labs_centre_integer",  # Class level (Level 2)
+  units_to_impute = "units_to_impute"  # School level (Level 3)
+)
+
+#setup variables_level
+variables_level <- character(ncol(data))
+names(variables_level) <- colnames(data)
+variables_level["labs_centre_integer"] <- "labs_centre_integer"
+variables_level["units_to_impute"] <- "units_to_impute"
+
+# Perform multilevel imputation
+number_of_imputations <- 10
+imputed_data <- 
+  mice(data, 
+       method = method, 
+       predictorMatrix = pred, 
+       m = number_of_imputations, 
+       maxit = 20,
+       seed = 500) 
+
+# View the imputed datasets in long format
+unit_imputations_renin_long <- 
+  complete(imputed_data, 
+           action = "long", 
+           include = TRUE)
+
+unit_imputations_renin_long_with_id_visit_date <-
+  cbind(
+    id_visit_date_key,
+    unit_imputations_renin_long
+    )
+
+#check our values are the same
+unit_imputations_renin_long_with_id_visit_date$alert_difference <-
+  ifelse(unit_imputations_renin_long_with_id_visit_date$manually_adjusted_value_number!=
+           unit_imputations_renin_long_with_id_visit_date$value_number, 
+         1, 
+         0)
+print("The following number has to be zero, otherwise the cbind has somehow staggered and should be reviewed:")
+max(unit_imputations_renin_long_with_id_visit_date$alert_difference, na.rm=T)
+
+#remove workings columns
+unit_imputations_renin_long_with_id_visit_date$value_number <- NULL
+unit_imputations_renin_long_with_id_visit_date$alert_difference <- NULL
+
+unit_imputations_renin_long_with_centre_key <-
+  left_join(
+    unit_imputations_renin_long,
+    labs_centre_key,
+    by=(c("labs_centre_integer"= "centre_integer"))
+  )
+
+#now get rid of the labs_centre_integer
+unit_imputations_renin_long_with_centre_key$labs_centre_integer <- NULL
+
+#re enter the units that correspond to each of the units to impute
+unit_imputations_renin_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_renin_long_with_centre_key$units_to_impute==integer_for_nmol_l ,
+           "nmol/l",
+           NA)
+
+unit_imputations_renin_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_renin_long_with_centre_key$units_to_impute==integer_for_ng_dl ,
+           "ng/dl",
+           unit_imputations_renin_long_with_centre_key$units_imputed)
+
+unit_imputations_renin_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_renin_long_with_centre_key$units_to_impute==integer_for_ng_ml ,
+           "ng/ml",
+           unit_imputations_renin_long_with_centre_key$units_imputed)
+
+unit_imputations_renin_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_renin_long_with_centre_key$units_to_impute==integer_for_µIU_ml  ,
+           "µIU/ml",
+           unit_imputations_renin_long_with_centre_key$units_imputed)
+
+unit_imputations_renin_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_renin_long_with_centre_key$units_to_impute==integer_for_ng_l  ,
+           "ng/l",
+           unit_imputations_renin_long_with_centre_key$units_imputed)
+
+#now get rid of the units_to_impute integer
+unit_imputations_renin_long_with_centre_key$units_to_impute <- NULL
+```
+
+```{r, reshape renin to wide}
+# Reshape unit_imputations_renin_long to wide format
+unit_imputations_renin_wide <- 
+  unit_imputations_renin_long_with_centre_key %>%
+  pivot_wider(names_from = .imp, values_from = -c(.id, .imp))
+
+print("Ensure this number is always zero so we know we are inserting the correct id_visit_date_key")
+nrow(id_visit_date_key) - nrow(unit_imputations_renin_wide)
+
+#create a centre_name then remove every column that contains centre_name_ as we aren't imputing centres, we're imputing units
+unit_imputations_renin_wide$centre_name <- 
+  unit_imputations_renin_wide$centre_name_0
+
+unit_imputations_renin_wide$value_number <- 
+  unit_imputations_renin_wide$value_number_0
+
+#we bind back in our id_visit_date, because we didn't have it included for the imputation
+unit_imputations_renin_wide_with_id_visit_date_key <-
+  cbind(unit_imputations_renin_wide,
+        id_visit_date_key)
+
+cols_to_remove <- 
+  grep("centre_name_|value_number_", 
+       names(unit_imputations_renin_wide_with_id_visit_date_key))
+
+unit_imputations_renin_wide_with_id_visit_date_key <- 
+  unit_imputations_renin_wide_with_id_visit_date_key[, -cols_to_remove]
+
+#we can get rid of the imputation id column because we have our own
+unit_imputations_renin_wide_with_id_visit_date_key$.id <- NULL
+
+#check our values are the same
+unit_imputations_renin_wide_with_id_visit_date_key$alert_difference <-
+  ifelse(unit_imputations_renin_wide_with_id_visit_date_key$manually_adjusted_value_number!=
+           unit_imputations_renin_wide_with_id_visit_date_key$value_number, 
+         1, 
+         0)
+print("The following number has to be zero, otherwise the cbind has somehow staggered and should be reviewed:")
+max(unit_imputations_renin_wide_with_id_visit_date_key$alert_difference, na.rm=T)
+
+#remove workings columns
+unit_imputations_renin_wide_with_id_visit_date_key$value_number <- NULL
+unit_imputations_renin_wide_with_id_visit_date_key$alert_difference <- NULL
+unit_imputations_renin_wide_imputed <- 
+  subset(unit_imputations_renin_wide_with_id_visit_date_key, is.na(units_imputed_0))
+```
+
+```{r, plot imputed renin units}
+for (each_imputation in 1:number_of_imputations) {
+  
+  converted_column_name <- 
+    paste0("units_imputed_", each_imputation)
+
+  #then rename the converted column
+  names(unit_imputations_renin_wide)[names(unit_imputations_renin_wide)=="converted_column"] <- 
+    converted_column_name
+
+}
+
+#create an overall plot to be able to compare to that has all of the values across the entire dataset
+overall_renin_units_plot <-
+  ggplot(data=subset(long_renin_to_impute_units), 
+         aes(x=value_number),
+         alpha=0.5) + 
+  geom_density(aes(fill=units_to_use),
+         alpha=0.5) + 
+  scale_fill_manual(values = c("ng/dl"="blue", 
+                               "ng/ml"="red", 
+                               "nmol/l"="darkgreen", 
+                               "µIU/ml"="darkorange", 
+                               "ng/l"="pink", 
+                               "missing"="black")) + 
+  labs(title="Overall distribution of renin values",
+  y="Density") + 
+  xlim(-4,10) +
+  themewithlegend 
+
+#loop round each centre
+for (each_centre in unique(unit_imputations_renin_wide$centre_name)) {
+  print(each_centre)
+
+  centre_data_long <- 
+    subset(unit_imputations_renin_long_with_centre_key, centre_name==each_centre)
+  
+  centre_data_long_original <-
+    subset(centre_data_long, .imp==0)
+  
+  centre_data_wide <- 
+    subset(unit_imputations_renin_wide, centre_name==each_centre)
+  
+  cat("rows of missing data:")
+  
+  print(sum(is.na(centre_data_wide$units_imputed_0)))
+  
+  frequency_frame <- 
+    subset(
+      rownames_to_column(as.data.frame(freq(centre_data_long$units_imputed)), var="units"), 
+           units!="Total" & units!="<NA>")
+  
+  highest_frequency_frame <-
+    frequency_frame %>%
+    slice_max(Freq, n=1, with_ties = F)
+  
+  highest_frequency_marker <- 
+    highest_frequency_frame[,"units"]
+  
+        
+  highest_frequency_colour <-
+    ifelse(nrow(highest_frequency_frame)==0,
+         "black",
+         NA)  
+  
+  highest_frequency_marker <-
+    ifelse(nrow(highest_frequency_frame)==0,
+         "black",
+         NA)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/dl",
+           "blue",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/ml",
+           "red",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="nmol/l",
+           "darkgreen",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="µIU/ml",
+           "darkorange",
+           highest_frequency_colour)
+  
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/l",
+           "pink",
+           highest_frequency_colour)
+
+  
+  frequency_bar_plot <-
+    ggplot(frequency_frame, aes(x = units, y = Freq)) +
+  geom_bar(stat = "identity", aes(fill=units)) +
+  scale_fill_manual(
+    values = c(                "nmol/l"="darkgreen", 
+                               "ng/dl"="blue", 
+                               "ng/ml"="red", 
+                               "µIU/ml"="darkorange", 
+                               "ng/l"="pink", 
+                               "missing"="black")) + 
+  labs(x = "Frequency", 
+       y = NULL, 
+       title = "Frequency of each unit across imputations") +
+    coord_flip() +
+  themepowerpoint
+    
+  #take out the percentage of data with missing units to use in the title of the plot
+  percentage_of_data_missing_units <-
+    round(100 * sum(is.na(centre_data_long_original$units_imputed)) / 
+      (sum(!is.na(centre_data_long_original$units_imputed)) + 
+         sum(is.na(centre_data_long_original$units_imputed))))
+
+    #correct for 0 to prevent 0 divided by 0 being NAN
+  percentage_of_data_missing_units <-
+    ifelse(sum(!is.na(centre_data_long_original$units_imputed)) + 
+         sum(is.na(centre_data_long_original$units_imputed))==0,
+         100,
+         percentage_of_data_missing_units)
+  
+  #give me a density plot of that centres values
+  centre_specific_renin_plot <-
+    ggplot(data=subset(centre_data_long
+                     ), 
+         aes(x=value_number),
+         alpha=0.5) + 
+  geom_density(aes(), fill=highest_frequency_colour,
+         alpha=0.5) + 
+  labs(title=paste0(
+    "Percentage data with missing units: ",
+    percentage_of_data_missing_units,
+    "% from ",
+    each_centre),  
+    subtitle=paste0("n=", length(centre_data_long_original$units_imputed)),
+    y="Density") + 
+  xlim(-4,10) +
+  themewithlegend 
+
+  grid_plot <-
+    grid.arrange(overall_renin_units_plot, centre_specific_renin_plot, frequency_bar_plot, ncol=1)
+  
+  dir.create("plots_of_categorical_imputation_renin")
+  
+  ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_renin", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  
+  #put it in a sub folder if there are some imputed values
+  if(sum(is.na(centre_data_long_original$units_imputed))>0){
+  dir.create("plots_of_categorical_imputation_renin/with_imputed_values")
+    ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_renin/with_imputed_values", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  }
+  #put it in a different sub folder if there are no imputed values
+  if(sum(is.na(centre_data_long_original$units_imputed))==0){
+  dir.create("plots_of_categorical_imputation_renin/without_imputed_values")
+    ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_renin/without_imputed_values", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  }
+}
+
+```
+
+*********************************************************************
+Plasma Renin Activity
+*********************************************************************
+
+```{r, impute missing plasma_renin_activity units}
+# Data preparation
+data <- 
+  long_plasma_renin_activity_to_impute_units
+
+#descr(data$value_number)
+freq(data$units_to_use)
+
+
+freq(data$units_to_use)
+# Handling different units - give each unit a specific integer
+data$units_to_impute <- ifelse(data$units_to_use == "nmol/l", integer_for_nmol_l, NA)
+data$units_to_impute <- ifelse(data$units_to_use == "ng/dl", integer_for_ng_dl, data$units_to_impute)
+data$units_to_impute <- ifelse(data$units_to_use == "ng/ml", integer_for_ng_ml, data$units_to_impute)
+data$units_to_impute <- ifelse(data$units_to_use == "µIU/ml", integer_for_µIU_ml, data$units_to_impute)
+data$units_to_impute <- ifelse(data$units_to_use == "ng/l", integer_for_ng_l, data$units_to_impute)
+data$units_to_impute <- ifelse(data$units_to_use == "fmol/l/s", integer_for_fmol_l_s, data$units_to_impute)
+data$units_to_impute <- ifelse(data$units_to_use == "ng/ml/hr", integer_for_ng_ml_hr, data$units_to_impute)
+data$units_to_impute <- ifelse(data$units_to_use == "nmol/l/hr", integer_for_nmol_l_hr, data$units_to_impute)
+
+# Convert character columns to factors or integers to allow MICE to function
+data$units_to_impute <- 
+  as.integer(data$units_to_impute)
+
+data$labs_centre_name <- 
+  as.factor(data$labs_centre_name)
+
+data$labs_centre_integer <- 
+  as.integer(data$labs_centre_name)
+
+labs_centre_key <-
+  unique(
+    data.frame(
+    centre_integer=data$labs_centre_integer,
+    centre_name=data$labs_centre_name
+  ))
+
+id_visit_date_key <-
+  (
+    data.frame(
+    id_visit_date=data$id_visit_date,
+    manually_adjusted_value_number=data$value_number
+  ))
+  
+data$units_to_use <- NULL
+  
+data$id_visit_date <- NULL
+
+data$labs_centre_name <- NULL
+
+# Create a predictor matrix and specify methods for multilevel imputation
+pred <- 
+  make.predictorMatrix(data)
+
+#create a method matrix that we can then adjust
+method <- 
+  make.method(data)
+
+#adjust our method matrix
+method["value_number"] <- "pmm"  # Multilevel imputation for continuous variable
+
+method["labs_centre_integer"] <- ""  # No imputation for class variable
+
+method["units_to_impute"] <- "pmm"
+
+#method["units_to_impute"] <- "2lonly.mean"  # Use 2lonly.mean to handle partially missing level-2 data - problem is this doesn't impute values for my level 3!
+
+# Adjust the predictor matrix
+pred["value_number", "value_number"] <- 1
+pred["value_number", "units_to_impute"] <- -2
+pred["value_number", "labs_centre_integer"] <- -2  # Indicates clustering variable
+pred["units_to_impute", "value_number"] <- 1
+pred["units_to_impute", "units_to_impute"] <- -2
+pred["units_to_impute", "labs_centre_integer"] <- -2  # Indicates clustering variable
+pred["labs_centre_integer", "value_number"] <- 1
+pred["labs_centre_integer", "units_to_impute"] <- -2
+pred["labs_centre_integer", "labs_centre_integer"] <- -2
+#create a matrix plot of our predictor matrix
+#plot_pred(pred)
+
+# Set up levels_id
+levels_id <- list(
+#  value_number = NULL,  # Individual level (Level 1)
+  labs_centre_integer = "labs_centre_integer",  # Class level (Level 2)
+  units_to_impute = "units_to_impute"  # School level (Level 3)
+)
+
+#setup variables_level
+variables_level <- character(ncol(data))
+names(variables_level) <- colnames(data)
+variables_level["labs_centre_integer"] <- "labs_centre_integer"
+variables_level["units_to_impute"] <- "units_to_impute"
+
+# Perform multilevel imputation
+number_of_imputations <- 10
+imputed_data <- 
+  mice(data, 
+       method = method, 
+       predictorMatrix = pred, 
+       m = number_of_imputations, 
+       maxit = 20,
+       seed = 500) 
+
+# View the imputed datasets in long format
+unit_imputations_plasma_renin_activity_long <- 
+  complete(imputed_data, 
+           action = "long", 
+           include = TRUE)
+
+unit_imputations_plasma_renin_activity_long_with_id_visit_date <-
+  cbind(
+    id_visit_date_key,
+    unit_imputations_plasma_renin_activity_long
+    )
+
+#check our values are the same
+unit_imputations_plasma_renin_activity_long_with_id_visit_date$alert_difference <-
+  ifelse(unit_imputations_plasma_renin_activity_long_with_id_visit_date$manually_adjusted_value_number!=
+           unit_imputations_plasma_renin_activity_long_with_id_visit_date$value_number, 
+         1, 
+         0)
+print("The following number has to be zero, otherwise the cbind has somehow staggered and should be reviewed:")
+max(unit_imputations_plasma_renin_activity_long_with_id_visit_date$alert_difference, na.rm=T)
+
+#remove workings columns
+unit_imputations_plasma_renin_activity_long_with_id_visit_date$value_number <- NULL
+unit_imputations_plasma_renin_activity_long_with_id_visit_date$alert_difference <- NULL
+
+
+unit_imputations_plasma_renin_activity_long_with_centre_key <-
+  left_join(
+    unit_imputations_plasma_renin_activity_long,
+    labs_centre_key,
+    by=(c("labs_centre_integer"= "centre_integer"))
+  )
+
+#now get rid of the labs_centre_integer
+unit_imputations_plasma_renin_activity_long_with_centre_key$labs_centre_integer <- NULL
+
+#re enter the units that correspond to each of the units to impute
+unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_plasma_renin_activity_long_with_centre_key$units_to_impute==integer_for_nmol_l ,
+           "nmol/l",
+           NA)
+
+unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_plasma_renin_activity_long_with_centre_key$units_to_impute==integer_for_ng_dl ,
+           "ng/dl",
+           unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed)
+
+unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_plasma_renin_activity_long_with_centre_key$units_to_impute==integer_for_ng_ml ,
+           "ng/ml",
+           unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed)
+
+unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_plasma_renin_activity_long_with_centre_key$units_to_impute==integer_for_µIU_ml  ,
+           "µIU/ml",
+           unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed)
+
+unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_plasma_renin_activity_long_with_centre_key$units_to_impute==integer_for_ng_l  ,
+           "ng/l",
+           unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed)
+
+unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_plasma_renin_activity_long_with_centre_key$units_to_impute==integer_for_fmol_l_s   ,
+           "fmol/l/s",
+           unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed)
+
+unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_plasma_renin_activity_long_with_centre_key$units_to_impute==integer_for_ng_ml_hr   ,
+           "ng/ml/hr",
+           unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed)
+
+unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed <- 
+    ifelse(unit_imputations_plasma_renin_activity_long_with_centre_key$units_to_impute==integer_for_nmol_l_hr   ,
+           "nmol/l/hr",
+           unit_imputations_plasma_renin_activity_long_with_centre_key$units_imputed)
+
+#now get rid of the units_to_impute integer
+unit_imputations_plasma_renin_activity_long_with_centre_key$units_to_impute <- NULL
+
+
+```
+
+```{r, reshape plasma_renin_activity to wide}
+# Reshape unit_imputations_plasma_renin_activity_long to wide format
+unit_imputations_plasma_renin_activity_wide <- 
+  unit_imputations_plasma_renin_activity_long_with_centre_key %>%
+  pivot_wider(names_from = .imp, values_from = -c(.id, .imp))
+
+print("Ensure this number is always zero so we know we are inserting the correct id_visit_date_key")
+nrow(id_visit_date_key) - nrow(unit_imputations_plasma_renin_activity_wide)
+
+#create a centre_name then remove every column that contains centre_name_ as we aren't imputing centres, we're imputing units
+unit_imputations_plasma_renin_activity_wide$centre_name <- 
+  unit_imputations_plasma_renin_activity_wide$centre_name_0
+
+unit_imputations_plasma_renin_activity_wide$value_number <- 
+  unit_imputations_plasma_renin_activity_wide$value_number_0
+
+#we bind back in our id_visit_date, because we didn't have it included for the imputation
+unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key <-
+  cbind(unit_imputations_plasma_renin_activity_wide,
+        id_visit_date_key)
+
+cols_to_remove <- 
+  grep("centre_name_|value_number_", 
+       names(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key))
+
+unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key <- 
+  unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key[, -cols_to_remove]
+
+#we can get rid of the imputation id column because we have our own
+unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$.id <- NULL
+
+
+#check our values are the same
+unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$alert_difference <-
+  ifelse(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$manually_adjusted_value_number!=
+           unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$value_number, 
+         1, 
+         0)
+print("The following number has to be zero, otherwise the cbind has somehow staggered and should be reviewed:")
+max(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$alert_difference, na.rm=T)
+
+#remove workings columns
+unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$value_number <- NULL
+unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$alert_difference <- NULL
+
+
+unit_imputations_plasma_renin_activity_wide_imputed <- 
+  subset(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key, is.na(units_imputed_0))
+```
+
+```{r, plot imputed plasma_renin_activity units}
+for (each_imputation in 1:number_of_imputations) {
+  
+  converted_column_name <- 
+    paste0("units_imputed_", each_imputation)
+
+  #then rename the converted column
+  names(unit_imputations_plasma_renin_activity_wide)[names(unit_imputations_plasma_renin_activity_wide)=="converted_column"] <- 
+    converted_column_name
+
+}
+
+#create an overall plot to be able to compare to that has all of the values across the entire dataset
+overall_plasma_renin_activity_units_plot <-
+  ggplot(data=subset(long_plasma_renin_activity_to_impute_units), 
+         aes(x=value_number),
+         alpha=0.5) + 
+  geom_density(aes(fill=units_to_use),
+         alpha=0.5) + 
+  scale_fill_manual(values = c("ng/dl"="blue", 
+                               "ng/ml"="red", 
+                               "nmol/l"="darkgreen", 
+                               "µIU/ml"="darkorange", 
+                               "ng/l"="pink", 
+                               "fmol/l/s"="blue", #note we can reuse these colours as they shouldnt coexist
+                               "ng/ml/hr"="red", 
+                               "nmol/l/hr"="darkgreen", 
+                               "missing"="black")) + 
+  labs(title="Overall distribution of plasma_renin_activity values",
+  y="Density") + 
+  xlim(-4,10) +
+  themewithlegend 
+
+#loop round each centre
+for (each_centre in unique(unit_imputations_plasma_renin_activity_wide$centre_name)) {
+  print(each_centre)
+
+  centre_data_long <- 
+    subset(unit_imputations_plasma_renin_activity_long_with_centre_key, centre_name==each_centre)
+  
+  centre_data_long_original <-
+    subset(centre_data_long, .imp==0)
+  
+  centre_data_wide <- 
+    subset(unit_imputations_plasma_renin_activity_wide, centre_name==each_centre)
+  
+  cat("rows of missing data:")
+  
+  print(sum(is.na(centre_data_wide$units_imputed_0)))
+  
+  frequency_frame <- 
+    subset(
+      rownames_to_column(as.data.frame(freq(centre_data_long$units_imputed)), var="units"), 
+           units!="Total" & units!="<NA>")
+  
+  highest_frequency_frame <-
+    frequency_frame %>%
+    slice_max(Freq, n=1, with_ties = F)
+  
+  highest_frequency_marker <- 
+    highest_frequency_frame[,"units"]
+  
+          
+  highest_frequency_colour <-
+    ifelse(nrow(highest_frequency_frame)==0,
+         "black",
+         NA)  
+  
+  highest_frequency_marker <-
+    ifelse(nrow(highest_frequency_frame)==0,
+         "black",
+         NA)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/dl",
+           "blue",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/ml",
+           "red",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="nmol/l",
+           "darkgreen",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="µIU/ml",
+           "darkorange",
+           highest_frequency_colour)
+  
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/l",
+           "pink",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="fmol/l/s",
+           "blue",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="ng/ml/hr",
+           "red",
+           highest_frequency_colour)
+  
+  highest_frequency_colour <-
+    ifelse(highest_frequency_marker=="nmol/l/hr",
+           "darkgreen",
+           highest_frequency_colour)
+
+  
+  frequency_bar_plot <-
+    ggplot(frequency_frame, aes(x = units, y = Freq)) +
+  geom_bar(stat = "identity", aes(fill=units)) +
+  scale_fill_manual(
+    values = c(                "nmol/l"="darkgreen", 
+                               "ng/dl"="blue", 
+                               "ng/ml"="red", 
+                               "µIU/ml"="darkorange", 
+                               "ng/l"="pink", 
+                               "missing"="black",
+                               "fmol/l/s"="blue", #note we can reuse these colours as they shouldnt coexist
+                               "ng/ml/hr"="red", 
+                               "nmol/l/hr"="darkgreen")) + 
+  labs(x = "Frequency", 
+       y = NULL, 
+       title = "Frequency of each unit across imputations") +
+    coord_flip() +
+  themepowerpoint
+    
+  #take out the percentage of data with missing units to use in the title of the plot
+  percentage_of_data_missing_units <-
+    round(100 * sum(is.na(centre_data_long_original$units_imputed)) / 
+      (sum(!is.na(centre_data_long_original$units_imputed)) + 
+         sum(is.na(centre_data_long_original$units_imputed))))
+  #correct for 0 to prevent 0 divided by 0 being NAN
+  percentage_of_data_missing_units <-
+    ifelse(sum(!is.na(centre_data_long_original$units_imputed)) + 
+         sum(is.na(centre_data_long_original$units_imputed))==0,
+         100,
+         percentage_of_data_missing_units)
+  
+  #give me a density plot of that centres values
+  centre_specific_plasma_renin_activity_plot <-
+    ggplot(data=subset(centre_data_long
+                     ), 
+         aes(x=value_number),
+         alpha=0.5) + 
+  geom_density(aes(), fill=highest_frequency_colour,
+         alpha=0.5) + 
+  labs(title=paste0(
+    "Percentage data with missing units: ",
+    percentage_of_data_missing_units,
+    "% from ",
+    each_centre),  
+    subtitle=paste0("n=", length(centre_data_long_original$units_imputed)),
+    y="Density") + 
+  xlim(-4,10) +
+  themewithlegend 
+
+  grid_plot <-
+    grid.arrange(overall_plasma_renin_activity_units_plot, 
+                 centre_specific_plasma_renin_activity_plot, frequency_bar_plot, ncol=1)
+  
+  dir.create("plots_of_categorical_imputation_plasma_renin_activity")
+  
+  ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_plasma_renin_activity", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  
+  #put it in a sub folder if there are some imputed values
+  if(sum(is.na(centre_data_long_original$units_imputed))>0){
+  dir.create("plots_of_categorical_imputation_plasma_renin_activity/with_imputed_values")
+    ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_plasma_renin_activity/with_imputed_values", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  }
+  #put it in a different sub folder if there are no imputed values
+  if(sum(is.na(centre_data_long_original$units_imputed))==0){
+  dir.create("plots_of_categorical_imputation_plasma_renin_activity/without_imputed_values")
+    ggsave(filename=paste0(each_centre, ".tif"), 
+  path="plots_of_categorical_imputation_plasma_renin_activity/without_imputed_values", 
+  plot = grid_plot, 
+  device="tiff",  
+  width=5, 
+  height=10)
+  }
+}
+
+```
+
+```{r, change units to use to conversion factors }
+#we now have all our unit imputation frames
+#we take this frames and record them in csv before we convert the units
+dir.create("Unit_imputation_frames")
+write.csv(x=unit_imputations_17OHP_wide_with_id_visit_date_key,
+            "Unit_imputation_frames/unit_imputations_17OHP_wide_with_id_visit_date_key.csv",
+            row.names = F)
+write.csv(x=unit_imputations_androstenedione_wide_with_id_visit_date_key,
+            "Unit_imputation_frames/unit_imputations_androstenedione_wide_with_id_visit_date_key.csv",
+            row.names = F)
+write.csv(x=unit_imputations_renin_wide_with_id_visit_date_key,
+            "Unit_imputation_frames/unit_imputations_renin_wide_with_id_visit_date_key.csv",
+            row.names = F)
+write.csv(x=unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key,
+            "Unit_imputation_frames/unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key.csv",
+            row.names = F)
+
+```
+
+
+```{r, convert units of 17OHP}
+print("At beginning of unit conversion, the values of 17OHP are:")
+descr(unit_imputations_17OHP_wide_with_id_visit_date_key$manually_adjusted_value_number)
+
+
+for (each_imputation in 0:number_of_imputations){
+  
+  print(each_imputation)
+  #create a name for the converted value column based on the imputation we are at in the loop
+  name_of_converted_column <- 
+    paste0("converted_17OHP_nmol_l_imputed_units_", each_imputation)
+  
+  #we also log convert
+  name_of_ln_converted_column <-
+    paste0("ln_converted_17OHP_nmol_l_imputed_units_", each_imputation)
+  
+  #find the imputed units column to refer to 
+  name_of_units_column <-
+    paste0("units_imputed_", each_imputation)
+  
+  #create the converted value based on the imputed units. We convert to nmol/l in the case of 17OHP
+  unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_17OHP_wide_with_id_visit_date_key[,name_of_units_column]==
+             "nmol/l",
+           unit_imputations_17OHP_wide_with_id_visit_date_key$manually_adjusted_value_number * convert_17OHP_nmol_l_to_nmol_l ,
+           NA)
+  
+  unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_17OHP_wide_with_id_visit_date_key[,name_of_units_column]==
+             "ng/dl",
+           unit_imputations_17OHP_wide_with_id_visit_date_key$manually_adjusted_value_number * convert_17OHP_ng_dl_to_nmol_l  ,
+           unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value)
+  
+  unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_17OHP_wide_with_id_visit_date_key[,name_of_units_column]==
+             "ng/ml",
+           unit_imputations_17OHP_wide_with_id_visit_date_key$manually_adjusted_value_number * convert_17OHP_ng_ml_to_nmol_l   ,
+           unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value)
+  
+  #correct our converted value for the lower level of detection
+  unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value < 
+             lower_level_of_detection_17ohp_nmol_l,
+           lower_level_of_detection_17ohp_nmol_l,
+           unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value)
+  
+  #correct our converted value for the upper level of detection
+  unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value > 
+             upper_level_of_detection_17ohp_nmol_l,
+           upper_level_of_detection_17ohp_nmol_l,
+           unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value)
+  
+  #then log convert our converted value
+  unit_imputations_17OHP_wide_with_id_visit_date_key$ln_converted_value  <-
+    log(unit_imputations_17OHP_wide_with_id_visit_date_key$converted_value)
+  
+  #then change our converted column to the name we assign to this imputation in the loop 
+  names(unit_imputations_17OHP_wide_with_id_visit_date_key)[names(
+    unit_imputations_17OHP_wide_with_id_visit_date_key)=="converted_value"] <- name_of_converted_column
+  
+  #then change our ln converted column to the name we assign to this imputation in the loop 
+  names(unit_imputations_17OHP_wide_with_id_visit_date_key)[names(
+    unit_imputations_17OHP_wide_with_id_visit_date_key)=="ln_converted_value"] <- name_of_ln_converted_column
+  
+  #then we can move on to the next imputation
+}
+
+#then we want to get rid of all the imputed units columns and the centre name and manually_adjusted_value_number (this will be the same as the zero imputation value) ready for a join
+cols_to_remove <- 
+  grep("units_imputed_|centre_name|manually_adjusted_value_number", 
+       names(unit_imputations_17OHP_wide_with_id_visit_date_key))
+
+converted_17OHP_to_join <- 
+  unit_imputations_17OHP_wide_with_id_visit_date_key
+
+converted_17OHP_to_join <- 
+  converted_17OHP_to_join[, -cols_to_remove]
+
+descr(converted_17OHP_to_join$converted_17OHP_nmol_l_imputed_units_0)
+min(converted_17OHP_to_join$converted_17OHP_nmol_l_imputed_units_0, na.rm=T)
+```
+
+```{r, convert units of androstenedione}
+for (each_imputation in 0:number_of_imputations){
+  
+  print(each_imputation)
+  #create a name for the converted value column based on the imputation we are at in the loop
+  name_of_converted_column <- 
+    paste0("converted_androstenedione_nmol_l_imputed_units_", each_imputation)
+  
+  #we also log convert
+  name_of_ln_converted_column <-
+    paste0("ln_converted_androstenedione_nmol_l_imputed_units_", each_imputation)
+  
+  #find the imputed units column to refer to 
+  name_of_units_column <-
+    paste0("units_imputed_", each_imputation)
+  
+  #create the converted value based on the imputed units. We convert to nmol/l in the case of androstenedione
+  unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_androstenedione_wide_with_id_visit_date_key[,name_of_units_column]==
+             "nmol/l",
+           unit_imputations_androstenedione_wide_with_id_visit_date_key$manually_adjusted_value_number *
+             convert_androstenedione_nmol_l_to_nmol_l ,
+           NA)
+  
+  unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_androstenedione_wide_with_id_visit_date_key[,name_of_units_column]==
+             "ng/dl",
+           unit_imputations_androstenedione_wide_with_id_visit_date_key$manually_adjusted_value_number *
+             convert_androstenedione_ng_dl_to_nmol_l  ,
+           unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value)
+  
+  unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_androstenedione_wide_with_id_visit_date_key[,name_of_units_column]==
+             "ng/ml",
+           unit_imputations_androstenedione_wide_with_id_visit_date_key$manually_adjusted_value_number *
+             convert_androstenedione_ng_ml_to_nmol_l   ,
+           unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value)
+    
+  #correct our converted value for the lower level of detection
+  unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value < 
+             lower_level_of_detection_androstenedione_nmol_l,
+           lower_level_of_detection_androstenedione_nmol_l,
+           unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value)
+    
+  #correct our converted value for the upper level of detection
+  unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value > 
+             upper_level_of_detection_androstenedione_nmol_l,
+           upper_level_of_detection_androstenedione_nmol_l,
+           unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value)
+  
+    #then log convert our converted value
+  unit_imputations_androstenedione_wide_with_id_visit_date_key$ln_converted_value  <-
+    log(unit_imputations_androstenedione_wide_with_id_visit_date_key$converted_value)
+  
+  #then change our converted column to the name we assign to this imputation in the loop 
+  names(unit_imputations_androstenedione_wide_with_id_visit_date_key)[names(
+    unit_imputations_androstenedione_wide_with_id_visit_date_key)=="converted_value"] <- name_of_converted_column
+  
+  #then change our ln converted column to the name we assign to this imputation in the loop 
+  names(unit_imputations_androstenedione_wide_with_id_visit_date_key)[names(
+    unit_imputations_androstenedione_wide_with_id_visit_date_key)=="ln_converted_value"] <- name_of_ln_converted_column
+  
+  #then we can move on to the next imputation
+}
+
+cols_to_remove <- 
+  grep("units_imputed_|centre_name|manually_adjusted_value_number", 
+       names(unit_imputations_androstenedione_wide_with_id_visit_date_key))
+
+converted_androstenedione_to_join <- 
+  unit_imputations_androstenedione_wide_with_id_visit_date_key
+
+converted_androstenedione_to_join <- 
+  converted_androstenedione_to_join[, -cols_to_remove]
+```
+
+```{r, convert units of renin}
+for (each_imputation in 0:number_of_imputations){
+  
+  print(each_imputation)
+  #create a name for the converted value column based on the imputation we are at in the loop
+  name_of_converted_column <- 
+    paste0("converted_renin_µIU_ml_imputed_units_", each_imputation)
+  
+  #we also log convert
+  name_of_ln_converted_column <-
+    paste0("ln_converted_renin_µIU_ml_imputed_units_", each_imputation)
+
+  #find the imputed units column to refer to 
+  name_of_units_column <-
+    paste0("units_imputed_", each_imputation)
+  
+  #create the converted value based on the imputed units. We convert to nmol/l in the case of renin
+  unit_imputations_renin_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_renin_wide_with_id_visit_date_key[,name_of_units_column]==
+             "µIU/ml",
+           unit_imputations_renin_wide_with_id_visit_date_key$manually_adjusted_value_number *
+             convert_renin_µIU_ml_to_µIU_ml  ,
+           NA)
+  
+  unit_imputations_renin_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_renin_wide_with_id_visit_date_key[,name_of_units_column]==
+             "ng/l",
+           unit_imputations_renin_wide_with_id_visit_date_key$manually_adjusted_value_number *
+             convert_renin_ng_l_to_µIU_ml   ,
+           unit_imputations_renin_wide_with_id_visit_date_key$converted_value)
+    
+  #correct our converted value for the lower level of detection
+  unit_imputations_renin_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_renin_wide_with_id_visit_date_key$converted_value < 
+             lower_level_of_detection_renin_µIU_ml,
+           lower_level_of_detection_renin_µIU_ml,
+           unit_imputations_renin_wide_with_id_visit_date_key$converted_value)
+    
+  #correct our converted value for the lower level of detection
+  unit_imputations_renin_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_renin_wide_with_id_visit_date_key$converted_value > 
+             upper_level_of_detection_renin_µIU_ml,
+           upper_level_of_detection_renin_µIU_ml,
+           unit_imputations_renin_wide_with_id_visit_date_key$converted_value)
+  
+
+  #then log convert our converted value
+  unit_imputations_renin_wide_with_id_visit_date_key$ln_converted_value  <-
+    log(unit_imputations_renin_wide_with_id_visit_date_key$converted_value)
+  
+  #then change our converted column to the name we assign to this imputation in the loop 
+  names(unit_imputations_renin_wide_with_id_visit_date_key)[names(
+    unit_imputations_renin_wide_with_id_visit_date_key)=="converted_value"] <- name_of_converted_column
+  
+    #then change our ln converted column to the name we assign to this imputation in the loop 
+  names(unit_imputations_renin_wide_with_id_visit_date_key)[names(
+    unit_imputations_renin_wide_with_id_visit_date_key)=="ln_converted_value"] <- name_of_ln_converted_column
+  
+  #then we can move on to the next imputation
+}
+
+
+#then we want to get rid of all the imputed units columns and the centre name and manually_adjusted_value_number (this will be the same as the zero imputation value) ready for a join
+cols_to_remove <- 
+  grep("units_imputed_|centre_name|manually_adjusted_value_number", 
+       names(unit_imputations_renin_wide_with_id_visit_date_key))
+
+converted_renin_to_join <- 
+  unit_imputations_renin_wide_with_id_visit_date_key
+
+converted_renin_to_join <- 
+  converted_renin_to_join[, -cols_to_remove]
+```
+
+```{r, convert units of plasma_renin_activity to renin}
+for (each_imputation in 0:number_of_imputations){
+  
+  print(each_imputation)
+  #create a name for the converted value column based on the imputation we are at in the loop
+  name_of_converted_column <- 
+    paste0("converted_plasma_renin_activity_to_renin_µIU_ml_imputed_units_", each_imputation)
+  #we also log convert
+  name_of_ln_converted_column <-
+    paste0("ln_converted_plasma_renin_activity_to_renin_µIU_ml_imputed_units_", each_imputation)
+  #find the imputed units column to refer to 
+  name_of_units_column <-
+    paste0("units_imputed_", each_imputation)
+  
+  #create the converted value based on the imputed units. We convert to µIU/ml in the case of plasma_renin_activity
+  unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key[,name_of_units_column]==
+             "ng/ml/hr",
+           unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$manually_adjusted_value_number *
+             convert_plasma_renin_activity_ng_ml_hr_to_renin_µIU_ml   ,
+           NA)
+  
+  unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key[,name_of_units_column]==
+             "nmol/l/hr",
+           unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$manually_adjusted_value_number *
+             convert_plasma_renin_activity_nmol_l_hr_to_renin_µIU_ml   ,
+           unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value)
+  
+  unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key[,name_of_units_column]==
+             "fmol/l/s",
+           unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$manually_adjusted_value_number *
+             convert_plasma_renin_activity_fmol_l_s_to_renin_µIU_ml   ,
+           unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value)
+  
+  #correct our converted value for the lower level of detection
+  unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value < 
+             lower_level_of_detection_renin_µIU_ml,
+           lower_level_of_detection_renin_µIU_ml,
+           unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value)
+  
+  #correct our converted value for the upper level of detection
+  unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value <-
+    ifelse(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value > 
+             upper_level_of_detection_renin_µIU_ml,
+           upper_level_of_detection_renin_µIU_ml,
+           unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value)
+  
+  #then log convert our converted value
+  unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$ln_converted_value  <-
+    log(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key$converted_value)
+  
+  #then change our converted column to the name we assign to this imputation in the loop 
+  names(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key)[names(
+    unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key)=="converted_value"] <- 
+    name_of_converted_column
+    
+  #then change our ln converted column to the name we assign to this imputation in the loop 
+  names(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key)[names(
+    unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key)=="ln_converted_value"] <- 
+    name_of_ln_converted_column
+  
+  #then we can move on to the next imputation and loop round to the top
+}
+
+
+#then we want to get rid of all the imputed units columns and the centre name and manually_adjusted_value_number (this will be the same as the zero imputation value) ready for a join
+cols_to_remove <- 
+  grep("units_imputed_|centre_name|manually_adjusted_value_number", 
+       names(unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key))
+
+converted_plasma_renin_activity_to_join <- 
+  unit_imputations_plasma_renin_activity_wide_with_id_visit_date_key
+
+converted_plasma_renin_activity_to_join <- 
+  converted_plasma_renin_activity_to_join[, -cols_to_remove]
+```
+
+```{r, create a unifying renin frame for simply analysis of renin alongside plasma_renin_activity}
+print("Note that we have already converted plasma renin activity to the same units as renin, so this just combines the two measurements and ensures we only have one measurement going forward")
+
+converted_plasma_renin_activity_to_bind <-
+  converted_plasma_renin_activity_to_join
+
+#make the column names the same
+names(converted_plasma_renin_activity_to_bind) <-
+  names(converted_renin_to_join)
+
+#give a binary column
+converted_plasma_renin_activity_to_bind$original_renin_measurement <-
+  "plasma_renin_activity"
+converted_renin_to_join$original_renin_measurement <-
+  "renin"
+
+converted_combined_renin <-
+  rbind(converted_plasma_renin_activity_to_bind,
+        converted_renin_to_join)
+
+#then we will have the problem that on some occasions, some people have measured renin as well as plasma renin activity, so we need to prioritise those that measured renin directly in this case
+duplicated_id_visit_dates <-
+  rownames(subset(as.data.frame(freq(converted_combined_renin$id_visit_date)), Freq>1))
+#create a flag column that flags them
+converted_combined_renin$both_renin_measurements_available <-
+  ifelse(converted_combined_renin$id_visit_date %in% duplicated_id_visit_dates,
+         1,
+         0)
+
+print("There are this many rows with duplicated measurements, which is going to have been caused by both a renin and a plasma renin activity measurement. Prioritise the actual renin measurements and remove the others")
+sum(converted_combined_renin$both_renin_measurements_available)
+
+converted_combined_renin$flag_for_removal <-
+  ifelse(converted_combined_renin$both_renin_measurements_available==1 &
+           converted_combined_renin$original_renin_measurement=="plasma_renin_activity",
+         1,
+         0)
+
+print("This should be half as many rows:")
+sum(converted_combined_renin$flag_for_removal)
+
+print("Meaning this number should be zero, to ensure we've removed the right readings:")
+sum(converted_combined_renin$both_renin_measurements_available) - 
+  sum(converted_combined_renin$flag_for_removal) * 2
+
+converted_combined_renin_to_join <-
+  subset(converted_combined_renin, flag_for_removal!=1)
+
+print("Meaning this frame should now be zero, saying that our id_visit_date for our combined metrics of renin are unique:")
+nrow(subset(as.data.frame(freq(converted_combined_renin_to_join$id_visit_date)), Freq>1)) - 2
+
+#we now tidy the working columns out of this frame
+converted_combined_renin_to_join$flag_for_removal <- NULL
+
+converted_combined_renin_to_join$both_renin_measurements_available <- NULL
+```
+
+```{r, sense check after adding limits of detection}
+descr(converted_17OHP_to_join$converted_17OHP_nmol_l_imputed_units_0)
+histogram <- 
+  ggplot(converted_17OHP_to_join, aes_string(x="converted_17OHP_nmol_l_imputed_units_0")) +
+  geom_histogram(bins=50, colour="black", aes() ) +
+  scale_fill_manual(values=c("Male"="blue",
+                             "Female"="red",
+                             "Not assigned"="green")) +
+  themepowerpoint
+print(histogram)
+```
+
+```{r, sense check after adding limits of detection}
+descr(converted_androstenedione_to_join$converted_androstenedione_nmol_l_imputed_units_0)
+histogram <- 
+  ggplot(converted_androstenedione_to_join, aes_string(x="converted_androstenedione_nmol_l_imputed_units_0")) +
+  geom_histogram(bins=50, colour="black", aes() ) +
+  scale_fill_manual(values=c("Male"="blue",
+                             "Female"="red",
+                             "Not assigned"="green")) +
+  themepowerpoint
+print(histogram)
+
+descr(converted_renin_to_join$converted_renin_µIU_ml_imputed_units_0)
+histogram <- 
+  ggplot(converted_renin_to_join, aes_string(x="converted_renin_µIU_ml_imputed_units_0")) +
+  geom_histogram(bins=50, colour="black", aes() ) +
+  scale_fill_manual(values=c("Male"="blue",
+                             "Female"="red",
+                             "Not assigned"="green")) +
+  themepowerpoint
+print(histogram)
+
+descr(converted_plasma_renin_activity_to_join$converted_plasma_renin_activity_to_renin_µIU_ml_imputed_units_0)
+descr(converted_combined_renin_to_join$converted_renin_µIU_ml_imputed_units_0)
+
+min(converted_17OHP_to_join$converted_17OHP_nmol_l_imputed_units_0, na.rm=T)
+min(converted_androstenedione_to_join$converted_androstenedione_nmol_l_imputed_units_0, na.rm=T)
+min(converted_renin_to_join$converted_renin_µIU_ml_imputed_units_0, na.rm=T)
+min(converted_plasma_renin_activity_to_join$converted_plasma_renin_activity_to_renin_µIU_ml_imputed_units_0, na.rm=T)
+min(converted_combined_renin_to_join$converted_renin_µIU_ml_imputed_units_0, na.rm=T)
+
+print("My lower level of detection has now been standardised later on in the code to ensure that it is consistent across centres using different units, and is robust to log transformation prior to imputaiton")
+```
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_6")
+Sys.time()
+```

@@ -1,0 +1,283 @@
+Load packages and reread files using the prebuilt load files function
+
+```{r, load packages}
+rm(list = ls())
+
+#we first establish the location of the working directory where we keep everything, depending on whether it exists (i.e. which computer we are using)
+#check C drive
+#take the working directory otherwise, which should work every time
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- getwd()
+}
+
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+#we load the ar_participants just to compare dates of visits
+load_ar_files_function(previous_file_name = "file_6",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_labs_to_widen_with_units",
+                                   "converted_17OHP_to_join", #note if you impute any other markers than the original 4, you need to tweak the function to hack into it to insert the imputation frame
+                                   "converted_androstenedione_to_join",
+                                   "converted_renin_to_join",
+                                   "converted_plasma_renin_activity_to_join",
+                                   "converted_combined_renin_to_join"))
+
+```
+
+```{r, pull out the centre names before going wide to join back later}
+#we dont want to duplicate the centre every time we separate out a marker, but we also dont want to lose the centre just in case we have a row that doesnt have corresponding base_data. So take out the centres, and add them back when we have spread
+ar_labs_centres_to_join_back <-
+  unique(ar_labs_to_widen_with_units[,c("id_visit_date",
+                             "labs_centre_name")])
+```
+
+```{r, before we loop, we need to ensure we dont have duplicated id_visit_date in our imputed frames and slice maximum reading if more than one on the same day}
+#slice the highest value 
+converted_17OHP_to_join <- 
+  converted_17OHP_to_join %>% 
+  group_by(id_visit_date) %>% 
+  slice_max(converted_17OHP_nmol_l_imputed_units_0, n=1, with_ties=F) #note we can't slice our other imputed frames by assessment_id as they don't have it, instead we slice them again after we insert them
+
+converted_androstenedione_to_join <- 
+  converted_androstenedione_to_join %>% 
+  group_by(id_visit_date) %>% 
+  slice_max(converted_androstenedione_nmol_l_imputed_units_0, n=1, with_ties=F) #note we can't slice our other imputed frames by assessment_id as they don't have it, instead we slice them again after we insert them
+
+converted_renin_to_join <- 
+  converted_renin_to_join %>% 
+  group_by(id_visit_date) %>% 
+  slice_max(converted_renin_µIU_ml_imputed_units_0, n=1, with_ties=F) #note we can't slice our other imputed frames by assessment_id as they don't have it, instead we slice them again after we insert them
+
+converted_plasma_renin_activity_to_join <- 
+  converted_plasma_renin_activity_to_join %>% 
+  group_by(id_visit_date) %>% 
+  slice_max(converted_plasma_renin_activity_to_renin_µIU_ml_imputed_units_0, n=1, with_ties=F) 
+
+#note we can't slice our other imputed frames by assessment_id as they don't have it, instead we slice them again after we insert them
+
+converted_combined_renin_to_join <- 
+  converted_combined_renin_to_join %>% 
+  group_by(id_visit_date) %>% 
+  slice_max(converted_renin_µIU_ml_imputed_units_0, n=1, with_ties=F) #note we can't slice our other imputed frames by assessment_id as they don't have it, instead we slice them again after we insert them
+```
+
+```{r, create function to separate each marker and then take maximum marker per day if multiple measurements}
+ar_labs_wide <- 
+  data.frame(id_visit_date=unique(ar_labs_to_widen_with_units$id_visit_date))
+
+#just check that doesn't have any entries that don't have an id - percent valid should be 100%
+print("the following number should be zero to prove we have an id_visit_date for everyone:")
+sum(is.na(ar_labs_wide$id_visit_date))
+
+#then we create a function to pull out the separate markers, and at the end of this function we join it to the starterframe
+separate_marker_frame_function <- 
+
+  function(df, marker_to_pull){
+
+    separate_marker_frame <- 
+      df %>% 
+      filter(marker==marker_to_pull)
+    
+    #remove superfluous columns that arent necessary
+    separate_marker_frame$labs_centre_name <- NULL
+    separate_marker_frame$value <- NULL # we retain the raw value in another named column
+    separate_marker_frame$value_limit <- NULL
+    separate_marker_frame$value_number_comma <- NULL
+    separate_marker_frame$value_number_point <- NULL
+    separate_marker_frame$number_corrected_for_commas <- NULL
+    separate_marker_frame$first_contact_17ohp_units <- NULL
+    separate_marker_frame$first_contact_androstenedione_units <- NULL
+    separate_marker_frame$Unit.confirmation.Renin <- NULL
+    separate_marker_frame$Unit.confirmation.plasma.renin.activity <- NULL
+    separate_marker_frame$units <- NULL
+    
+
+    colnames(separate_marker_frame) <- 
+      paste(colnames(separate_marker_frame),
+            marker_to_pull,
+            sep="_")
+    
+    #then just repair the ones I don't want to rename
+    names(separate_marker_frame)[1] <- "assessment_id"
+    names(separate_marker_frame)[2] <- "id_visit_date"
+    
+    #get rid of the marker_ column because the marker is now in the column name
+    separate_marker_frame[3] <- NULL
+
+    #just take one lab reading that has been entered per visit
+    #use the biggest assessment_id for this purpose - the most recently entered marker value
+    #slice the most recent assessment_id
+    separate_marker_frame_to_join <- 
+      separate_marker_frame %>% 
+      group_by(id_visit_date) %>% 
+      slice_max(assessment_id, n=1, with_ties=F) #note we can't slice our other imputed frames by assessment_id as they don't have it, instead we sliced them above before the get used
+    
+    #remove the assessment_id as we now don't need it and it will cause duplication of joins
+    separate_marker_frame_to_join[1] <- NULL
+    
+    #then insert our imputed frames into this function if we are one of the imputed runs
+    if (marker_to_pull=="renin"){
+      separate_marker_frame_to_join <- 
+        converted_combined_renin_to_join
+    }
+    
+    if (marker_to_pull=="ohp17"){
+      separate_marker_frame_to_join <- 
+        converted_17OHP_to_join
+    }
+    
+    if (marker_to_pull=="andostenedione"){
+      separate_marker_frame_to_join <- 
+        converted_androstenedione_to_join
+    }
+
+    #join the marker into the ar_labs_wide frame as a full join so we don't lose any results
+    joined_frame <- 
+      dplyr::full_join(ar_labs_wide, 
+                       separate_marker_frame_to_join, 
+                       by=c("id_visit_date"="id_visit_date"))
+    
+    #assign that frame to the global environment
+    assign(deparse(substitute(ar_labs_wide)), 
+           joined_frame, 
+           env=.GlobalEnv)
+    
+    #also assign the frame that you joined itself
+    assign(paste0("data_from_", 
+                  deparse(substitute(df)), 
+                  "_of_marker_", 
+                  marker_to_pull), 
+           separate_marker_frame, env=.GlobalEnv)
+}
+
+#take out all the blood test markers that we want to loop through. Start with all of them then remove the ones we don't want
+available_markers <- 
+  (unique(ar_labs_to_widen_with_units$marker))
+
+#remove plasma_renin_activity from this vector because we are instead using our combined metric
+available_markers <-
+  available_markers[available_markers != "plasma_renin_activity"]
+
+#also remove any other marker that at this stage we don't want to worry about to keep the analysis frame manageable in the context of imputation columns being in there
+available_markers <-
+  available_markers[available_markers != "haemoglobin"]
+available_markers <-
+  available_markers[available_markers != "haematocrit"]
+available_markers <-
+  available_markers[available_markers != "lh"]
+available_markers <-
+  available_markers[available_markers != "fsh"]
+available_markers <-
+  available_markers[available_markers != "oestradiol"]
+available_markers <-
+  available_markers[available_markers != "shbg"]
+available_markers <-
+  available_markers[available_markers != "progesterone"]
+available_markers <-
+  available_markers[available_markers != "deoxycortisol11"]
+available_markers <-
+  available_markers[available_markers != "inhibin_b"]
+#adjust those variables to change the markers that get removed
+
+#loop all the markers through our function
+for (i in available_markers){
+  separate_marker_frame_function(
+    df=ar_labs_to_widen_with_units,
+    marker_to_pull=i)
+  }
+
+print("the long frame has this many rows:")
+nrow(ar_labs_to_widen_with_units)
+
+print("the wide frame has this many rows:")
+nrow(ar_labs_wide)
+
+freq_id_visit_date <- 
+  as.data.frame(freq(ar_labs_wide$id_visit_date))
+
+freq_id_visit_date_over_1 <- 
+  subset(freq_id_visit_date, Freq>1 & Freq<nrow(freq_id_visit_date))
+
+print("the following patients have id_visit_date duplicated after pivoting wider, which shouldn't happen. It should just say 'Total' in which case it has worked correctly")
+
+rownames(freq_id_visit_date_over_1)
+
+print("Just remember that we have deleted duplicate markers entered on the same day, and taken just the most recent data entry for that id_visit_date")
+```
+
+```{r, add back in centre names}
+#now we can add back in the labs_centre_names just in case we need them
+print("number of rows in ar_labs_wide before re joining labs centre names")
+nrow(ar_labs_wide)
+
+ar_labs_wide_with_centre_names <-
+  left_join(ar_labs_wide, ar_labs_centres_to_join_back, by="id_visit_date")
+
+print("number of rows in ar_labs_wide after re joining labs centre names")
+nrow(ar_labs_wide_with_centre_names)
+
+#rationalise the name of the frame
+ar_labs_wide <- 
+  ar_labs_wide_with_centre_names
+```
+
+```{r, check ar_labs_wide for duplicated id_visit_date}
+print("The following number should be 1, if it is greater than 1 then we have duplicated id_visit_date s in the labswide frame and the code needs checking:")
+as.numeric(max(subset(rownames_to_column(as.data.frame(freq(ar_labs_wide$id_visit_date))), 
+                      rowname !="Total" & rowname !="<NA>")$Freq))
+```
+
+```{r}
+write.csv(ar_labs_wide, 
+          "ar_labs_wide.csv")
+```
+
+```{r, remove the id column to prevent duplications when joining and give the ar_labs_wide a binary code, so when joined we can see when the data wasn't present in each sub frame}
+ar_labs_wide$id <- NULL
+
+ar_labs_wide$visit_in_labs_data <- 1
+```
+
+```{r, sense check after imputing units to see how many important markers we have}
+descr(ar_labs_wide$converted_17OHP_nmol_l_imputed_units_0)
+
+descr(ar_labs_wide$converted_androstenedione_nmol_l_imputed_units_0)
+
+descr(ar_labs_wide$converted_renin_µIU_ml_imputed_units_0)
+
+descr(ar_labs_wide$value_number_sodium)
+```
+
+we now have all the labs in wide format as ar_labs_wide with id_visit_date that we can join in later on 
+
+```{r, tidy environment}
+rm(ar_labs_to_widen_with_units)
+rm(converted_17OHP_to_join)
+rm(converted_androstenedione_to_join)
+rm(converted_renin_to_join)
+rm(converted_plasma_renin_activity_to_join)
+rm(converted_combined_renin_to_join)
+```
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_7")
+Sys.time()
+```
