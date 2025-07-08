@@ -1,0 +1,656 @@
+
+Load packages and reread files using the prebuilt load files function
+
+```{r, load packages}
+rm(list = ls())
+
+
+#take the working directory otherwise, which should work every time
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- getwd()
+}
+
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_3",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_participants_longitudinal_data",
+                                   "ar_participants_base_data"))
+
+load_ar_files_function(previous_file_name = "file_7", #note we now have unit imputation for unknown units of markers
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_labs_wide"))
+
+load_ar_files_function(previous_file_name = "file_8", #remember our conversion factors get saved once after being defined near to the meds frame and reloaded here 
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_meds_wide",
+                                   "prednisolone_to_hydrocortisone_conversion",
+                                   "dexamethasone_to_hydrocortisone_conversion",
+                                   "cortisone_acetate_to_hydrocortisone_conversion",
+                                   "methylprednisolone_to_hydrocortisone_conversion"))
+
+load_ar_files_function(previous_file_name = "file_9",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_fludro_wide"))
+```
+
+
+```{r, make all the id_visit_dates into characters before joining}
+ar_meds_wide$id_visit_date <- 
+  as.character(ar_meds_wide$id_visit_date)
+
+ar_fludro_wide$id_visit_date <- 
+  as.character(ar_fludro_wide$id_visit_date)
+
+ar_participants_longitudinal_data$id_visit_date <- 
+  as.character(ar_participants_longitudinal_data$id_visit_date)
+ar_labs_wide$id_visit_date <- 
+  as.character(ar_labs_wide$id_visit_date)
+
+```
+
+```{r, join ar_participants_longitudinal_data with ar_labs_wide}
+#full join in ar_labs_wide to longitudinal data
+a <- full_join(ar_participants_longitudinal_data, 
+               ar_labs_wide, 
+               by="id_visit_date")
+
+check_frame_a <- 
+  as.data.frame(freq(a$id_visit_date))
+
+print("number without an id in the joined frame, which is the number with a ar_labs_wide visit but not a ar_participants_longitudinal_visit")
+sum(is.na(a$id))
+
+#create id again to find out what rows werent in the longitudinal data
+a$id <- 
+  gsub(x=a$id_visit_date, 
+       pattern="_.*", 
+       replacement="")
+
+print("check everyone now has an ID - this number should be zero:")
+
+sum(is.na(a$id))
+
+```
+
+```{r, join ar_participants_longitudinal_data and ar_labs_wide with ar_meds_wide}
+#full join in ar_meds_wide
+b <- full_join(a, 
+               ar_meds_wide, 
+               by="id_visit_date")
+
+check_frame_b <- 
+  as.data.frame(freq(b$id_visit_date))
+
+print("number without an id in the joined frame, which is the number with a ar_meds_wide visit but not a ar_participants_longitudinal_visit or labs_wide visit")
+sum(is.na(b$id))
+
+b$id <- 
+  gsub(x=b$id_visit_date, pattern="_.*", replacement="")
+print("check everyone now has an ID - this number should be zero:")
+sum(is.na(b$id))
+
+```
+
+```{r, join ar_participants_longitudinal_data and ar_labs_wide and ar_meds_wide with ar_fludro_wide}
+#full join in fludro_wide
+c <- full_join(b, 
+               ar_fludro_wide, 
+               by="id_visit_date")
+print("number without an id in the joined frame, which is the number with a fludro_wide visit but not a ar_participants_longitudinal_visit, ar_meds_wide or ar_labs_wide visit")
+sum(is.na(c$id))
+
+e <- subset(b , grepl(x=id_visit_date, pattern="2933"))
+e$id_visit_date
+f <- subset(ar_fludro_wide , grepl(x=id_visit_date, pattern="2933"))
+f$id_visit_date
+print("this is the joined frame:")
+d <- subset(c , grepl(x=id_visit_date, pattern="2933"))
+d$id_visit_date
+
+c$id <- 
+  as.integer(gsub(x=c$id_visit_date, pattern="_.*", replacement=""))
+print("check everyone now has an ID - this number should be zero:")
+
+sum(is.na(c$id))
+
+check_frame_c <- 
+  as.data.frame(freq(c$id_visit_date))
+
+print("number without an id in the joined frame, which is the number with a ar_fludro_wide visit but not a ar_participants_longitudinal_visit, ar_meds_wide or ar_labs_wide visit")
+sum(is.na(c$id))
+```
+
+```{r, join ar_participants_longitudinal_data and ar_labs_wide and ar_meds_wide and ar_fludro_wide with ar_base_data}
+ar_data <- 
+  left_join(c, 
+            ar_participants_base_data, 
+            by="id")
+check_frame_ar_data <- 
+  as.data.frame(freq(c$id_visit_date))
+
+ar_data$id <- 
+  as.integer(gsub(x=ar_data$id_visit_date, pattern="_.*", replacement=""))
+
+ar_data$visit_date <- 
+  as.POSIXct(gsub(x=ar_data$id_visit_date, pattern=".*_", replacement=""), format="%Y-%m-%d")
+
+print("Maximum number of rows per id_visit_date minus 1 (should be 0):")
+as.numeric(max(
+  subset(
+    rownames_to_column(
+      as.data.frame(
+        freq(
+          ar_data$id_visit_date))), 
+    rowname !="Total" & rowname !="<NA>")$Freq)) - 1
+
+ar_data <- 
+  ar_data[order(ar_data$id,
+                ar_data$visit_date),] 
+```
+
+```{r, correction for those not contained in the longitudinal or base data}
+ar_data_visits_removed_for_no_base_data <-
+  subset(ar_data, is.na(visit_in_base_data))
+
+ar_data_patients_removed_for_no_base_data <-
+  unique(ar_data_visits_removed_for_no_base_data$id)
+
+number_of_rows_before_removal <- nrow(ar_data)
+ar_data <-
+  subset(ar_data, !is.na(visit_in_base_data))
+number_of_rows_before_removal - nrow(ar_data)
+```
+
+```{r, recreate id and visit_date from id_visit_date, as well as creating visit_date_unix}
+ar_data$id <- 
+  as.integer(gsub(x=ar_data$id_visit_date, 
+       pattern="_.*", 
+       replacement=""))
+
+ar_data$visit_date <- 
+  as.POSIXct(gsub(x=ar_data$id_visit_date, 
+       pattern=".*_", 
+       replacement=""), 
+       format="%Y-%m-%d")
+
+ar_data$visit_date_unix <- 
+  as.numeric(ar_data$visit_date)
+
+print("number of missing id")
+sum(is.na(ar_data$id))
+
+print("number of missing id_visit_date")
+sum(is.na(ar_data$id_visit_date))
+
+print("number of missing visit_date")
+sum(is.na(ar_data$id_visit_date))
+
+print("Total number of visits in data set:")
+nrow(ar_data)
+
+
+```
+
+```{r, create original columns to compare to a t the end of adjustments}
+ar_data$Glucocorticoids...Current.Medication_original <- ar_data$Glucocorticoids...Current.Medication
+ar_data$Glucocorticoids.note...Current.Medication_original <- ar_data$Glucocorticoids.note...Current.Medication
+ar_data$Fludrocortisone...Current.Medication_original <- ar_data$Fludrocortisone...Current.Medication
+ar_data$Fludrocortisone.frequency...Current.Medication_original <- ar_data$Fludrocortisone.frequency...Current.Medication
+ar_data$medicine_1_original <- ar_data$medicine_1
+ar_data$GC_dose_1_original <- ar_data$GC_dose_1 
+ar_data$meds_unit_1_original <- ar_data$meds_unit_1
+ar_data$meds_time_1_original <- ar_data$meds_time_1
+ar_data$meds_clock_time_1_original <- ar_data$meds_clock_time_1
+ar_data$medicine_2_original <- ar_data$medicine_2
+ar_data$GC_dose_2_original <- ar_data$GC_dose_2
+ar_data$meds_unit_2_original <- ar_data$meds_unit_2
+ar_data$meds_time_2_original <- ar_data$meds_time_2
+ar_data$meds_clock_time_2_original <- ar_data$meds_clock_time_2
+ar_data$medicine_3_original <- ar_data$medicine_3
+ar_data$GC_dose_3_original <- ar_data$GC_dose_3
+ar_data$meds_unit_3_original <- ar_data$meds_unit_3
+ar_data$meds_time_3_original <- ar_data$meds_time_3
+ar_data$meds_clock_time_3_original <- ar_data$meds_clock_time_3
+ar_data$different_GC_used_on_same_day_original <- ar_data$different_GC_used_on_same_day
+ar_data$absolute_daily_GC_dose_sum_original <- ar_data$absolute_daily_GC_dose_sum 
+ar_data$daily_preparation_of_GC_to_use_original <- ar_data$daily_preparation_of_GC_to_use
+ar_data$absolute_total_daily_hydrocortisone_at_visit_original <- ar_data$absolute_total_daily_hydrocortisone_at_visit
+ar_data$absolute_total_daily_prednisolone_at_visit_original <- ar_data$absolute_total_daily_prednisolone_at_visit
+ar_data$absolute_total_daily_prednisone_at_visit_original <- ar_data$absolute_total_daily_prednisone_at_visit
+ar_data$absolute_total_daily_dexamethasone_at_visit_original <- ar_data$absolute_total_daily_dexamethasone_at_visit
+ar_data$absolute_total_daily_other_GC_at_visit_original <- ar_data$absolute_total_daily_other_GC_at_visit
+ar_data$total_daily_hydrocortisone_equivalent_at_visit_original <- ar_data$total_daily_hydrocortisone_equivalent_at_visit
+ar_data$fludrocortisone_dose_original <- ar_data$fludrocortisone_dose
+ar_data$total_daily_fludro_dose_original <- ar_data$total_daily_fludro_dose
+descr(ar_data$total_daily_fludro_dose)
+```
+
+
+```{r, correction of Glucocorticoids...Current.Medication if we have dose data}
+ar_data$Glucocorticoids...Current.Medication <-
+  ifelse(!is.na(ar_data$daily_preparation_of_GC_to_use) &
+           ar_data$daily_preparation_of_GC_to_use!="none",
+         "Yes",
+         ar_data$Glucocorticoids...Current.Medication)
+```
+
+
+```{r, calculate number after joining everything for comparison later}
+number_of_rows_before_join <- 
+  nrow(ar_data)
+```
+
+Now that we have all of the visits included in all four frames, we can calculate our earliest and oldest visits and join them into the ar_data frame
+
+```{r, attach youngest visit date and oldest visit date to each row of a patient}
+youngest_visits <- 
+  ar_data %>% 
+  group_by(id) %>% 
+  slice_min(visit_date, 
+            with_ties = F)
+
+print("total number of participants in ar_data youngest visit frame")
+
+nrow(youngest_visits)
+
+youngest_visits_to_join <- 
+  youngest_visits[,c("id", 
+                     "visit_date")]
+
+#freq(youngest_visits_to_join$id)
+#no problem with ids in that frame
+
+names(
+  youngest_visits_to_join)[
+    names(youngest_visits_to_join)=="visit_date"] <- 
+  "earliest_visit_date"
+
+oldest_visits <- 
+  ar_data %>% 
+  group_by(id) %>% 
+  slice_max(visit_date, with_ties = F)
+
+#freq(oldest_visits_to_join$id)
+#no problem with ids in that frame
+
+oldest_visits_to_join <- 
+  oldest_visits[,c("id", 
+                   "visit_date")]
+
+names(oldest_visits_to_join)[names(oldest_visits_to_join)=="visit_date"] <- 
+  "oldest_visit_date"
+
+print("total number of participants in ar_data oldest visit frame")
+
+nrow(oldest_visits)
+
+total_number_of_visits_to_join <- 
+  oldest_visits[,c("id", "visit_date")]
+
+names(oldest_visits_to_join)[names(oldest_visits_to_join)=="visit_date"] <- 
+  "oldest_visit_date"
+
+print("total number of participants in ar_data oldest visit frame")
+
+nrow(oldest_visits)
+
+```
+
+```{r, create oldest_visits_before_20}
+oldest_visits_before_20 <- 
+  subset(ar_data, Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV..<20) %>%
+  group_by(id) %>% 
+  slice_max(visit_date, 
+            with_ties = F)
+
+oldest_visits_before_20_to_join <- 
+  oldest_visits_before_20[,c("id", 
+                             "visit_date")]
+
+
+names(oldest_visits_before_20_to_join)[names(oldest_visits_before_20_to_join)=="visit_date"] <-
+  "oldest_visit_date_before_20"
+```
+
+```{r, add oldest and youngest visits back to ar_data frame}
+ar_data_with_youngest_oldest <- 
+  dplyr::left_join(ar_data, 
+                   youngest_visits_to_join, 
+                   by="id")
+
+ar_data_with_youngest_oldest <- 
+  dplyr::left_join(ar_data_with_youngest_oldest, 
+                   oldest_visits_to_join, 
+                   by="id")
+
+ar_data_with_youngest_oldest <- 
+  dplyr::left_join(ar_data_with_youngest_oldest, 
+                   oldest_visits_before_20_to_join, 
+                   by="id")
+
+ar_data <- ar_data_with_youngest_oldest
+
+```
+
+Now we calculate the total_years_of_data_for_id
+
+```{r, calculate years of data in the registry for each patient}
+ar_data$total_years_of_data_for_id <- 
+  as.numeric(ar_data$oldest_visit_date - 
+               ar_data$earliest_visit_date) / 60 / 60 / 24 / 365.25
+
+ar_data$total_years_of_data_before_20_for_id <- 
+  as.numeric(ar_data$oldest_visit_date_before_20 - 
+               ar_data$earliest_visit_date) / 60 / 60 / 24 / 365.25
+
+print("description of years of follow up in patients under 20 years of age")
+
+descr(ar_data$total_years_of_data_before_20_for_id)
+```
+
+just take out one visit per patient in order to describe the number of years follow up
+
+```{r, describe number of years follow up into text file}
+dir.create("ICAH BP text file outputs")
+
+sink("./ICAH BP text file outputs/descriptions_of_number_of_years_of_follow_up.txt")
+
+recent_visits <- 
+  ar_data %>% 
+  group_by(id) %>% 
+  slice_max(Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV.., n=1, with_ties=F)
+
+recent_visits_before_20 <- 
+  subset(recent_visits, 
+         Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV..<20)
+
+descr(recent_visits_before_20$total_years_of_data_before_20_for_id)
+freq_centres <- 
+  subset(rownames_to_column(as.data.frame(freq(recent_visits_before_20$Centre.Name...Centre))), 
+         rowname!= "Total" & rowname!="<NA>")
+
+print("Description of number of patients per centre under 20 years old")
+
+descr(freq_centres$Freq)
+
+recent_visits_before_20_male <- 
+  subset(recent_visits_before_20, 
+         sex_1_for_M_2_for_F==1)
+
+freq_centres_male <- 
+  subset(rownames_to_column(as.data.frame(freq(recent_visits_before_20_male$Centre.Name...Centre))), 
+         rowname!= "Total" & 
+           rowname!="<NA>")
+
+print("Description of number of male patients per centre under 20 years old")
+
+descr(freq_centres_male$Freq)
+
+recent_visits_before_20_female <- 
+  subset(recent_visits_before_20, 
+         sex_1_for_M_2_for_F==2)
+
+freq_centres_female <- 
+  subset(rownames_to_column(as.data.frame(freq(recent_visits_before_20_female$Centre.Name...Centre))),
+         rowname!= "Total" & 
+           rowname!="<NA>")
+
+print("Description of number of female patients per centre under 20 years old")
+
+descr(freq_centres_female$Freq)
+
+sink()
+```
+
+```{r, check joining earliest and recent visit dates hasnt duplicated rows}
+print("number of rows in ar_data frame before earliest and oldest visit calculations and join:")
+number_of_rows_before_join
+
+print("number of rows in ar_data frame after earliest and oldest visit calculations and join:")
+nrow(ar_data)
+
+```
+
+```{r, rationalise columns in data, this will stop the file becoming quite so data intensive}
+#we now know we have all the data in one frame, but to make it manageable, we now need to rationalise our columns
+sink("colnames_before_removal.txt")
+colnames(ar_data)
+sink()
+
+#we have created other variables for these
+
+ar_data$Date...CAH.Longitudinal.Data <- NULL 
+
+ar_data$Weight..kg....CAH.Longitudinal.Data <- NULL 
+
+ar_data$Height..cm....CAH.Longitudinal.Data <- NULL 
+
+ar_data$Register.ID...Record <- NULL 
+
+freq(ar_data$Date.of.birth...Birth)
+ar_data$Date.of.birth...Birth <- NULL 
+
+#the following fields are poorly completed
+
+freq(ar_data$Waist.circumference..cm....CAH.Longitudinal.Data)
+ar_data$Waist.circumference..cm....CAH.Longitudinal.Data <- NULL 
+
+freq(ar_data$Hip.circumference..cm....CAH.Longitudinal.Data)
+ar_data$Hip.circumference..cm....CAH.Longitudinal.Data <- NULL 
+
+freq(ar_data$Number.of.pregnancies.in.the.past...Puberty.Female)
+ar_data$Number.of.pregnancies.in.the.past...Puberty.Female <- NULL 
+
+freq(ar_data$Number.of.live.births...Puberty.Female)
+ar_data$Number.of.live.births...Puberty.Female <- NULL 
+
+freq(ar_data$Birth.head.circumference..cm....Birth)
+ar_data$Birth.head.circumference..cm....Birth <- NULL 
+
+freq(ar_data$Data.can.be.shared.for.research.purposes...Consent)
+ar_data$Data.can.be.shared.for.research.purposes...Consent <- NULL 
+
+freq(ar_data$Current.gender...Details.of.Condition)
+ar_data$Current.gender...Details.of.Condition <- NULL 
+
+freq(ar_data$Karyotype...Details.of.Condition)
+ar_data$Karyotype...Details.of.Condition <- NULL 
+
+freq(ar_data$Disorder.type...Details.of.Condition)
+ar_data$Disorder.type...Details.of.Condition <- NULL 
+
+freq(ar_data$Actual.diagnosis...Details.of.Condition)
+ar_data$Actual.diagnosis...Details.of.Condition <- NULL 
+
+freq(ar_data$Specify.the.actual.diagnosis...Details.of.Condition)
+ar_data$Specify.the.actual.diagnosis...Details.of.Condition <- NULL 
+
+freq(ar_data$Date.of.condition.onset...Details.of.Condition)
+ar_data$Date.of.condition.onset...Details.of.Condition <- NULL 
+
+freq(ar_data$Diagnostic.biochemistry...Details.of.Condition)
+ar_data$Diagnostic.biochemistry...Details.of.Condition <- NULL 
+
+unique(ar_data$Diagnostic.biochemistry.additional.details...Details.of.Condition)
+ar_data$Diagnostic.biochemistry.additional.details...Details.of.Condition <- NULL 
+
+freq(ar_data$Diagnostic.genetics...Details.of.Condition)
+ar_data$Diagnostic.genetics...Details.of.Condition <- NULL 
+
+unique(ar_data$Diagnostic.genetics.additional.details...Details.of.Condition)
+ar_data$Diagnostic.genetics.additional.details...Details.of.Condition <- NULL
+
+freq(ar_data$Participation.in.Other.Registries...Details.of.Condition)
+ar_data$Participation.in.Other.Registries...Details.of.Condition <- NULL 
+
+freq(ar_data$Details.of.Registry.and.ID...Details.of.Condition)
+ar_data$Details.of.Registry.and.ID...Details.of.Condition <- NULL 
+
+freq(ar_data$History.of.similar.condition...Family)
+ar_data$History.of.similar.condition...Family <- NULL 
+
+freq(ar_data$Date.of.death...Death)
+ar_data$Date.of.death...Death <- NULL 
+
+freq(ar_data$Section...Death)
+ar_data$Section...Death <- NULL 
+
+freq(ar_data$Cause.of.death...Death)
+ar_data$Cause.of.death...Death <- NULL 
+
+freq(ar_data$Record...CAH.First.Presentation)
+ar_data$Record...CAH.First.Presentation <- NULL 
+
+freq(ar_data$Prenatal.diagnosis...CAH.First.Presentation)
+ar_data$Prenatal.diagnosis...CAH.First.Presentation <- NULL 
+
+unique(ar_data$Additional.details...CAH.First.Presentation)
+ar_data$Additional.details...CAH.First.Presentation <- NULL 
+
+freq(ar_data$Salt.wasting.crisis.at.presentation...CAH.First.Presentation)
+ar_data$Salt.wasting.crisis.at.presentation...CAH.First.Presentation <- NULL 
+
+freq(ar_data$Adrenal.crisis.at.first.presentation...CAH.First.Presentation)
+ar_data$Adrenal.crisis.at.first.presentation...CAH.First.Presentation <- NULL 
+
+
+
+#the following fields are not directly of use
+freq(ar_data$Cushingoid...CAH.Longitudinal.Data)
+ar_data$Cushingoid...CAH.Longitudinal.Data <- NULL 
+
+freq(ar_data$Virilisation...CAH.Longitudinal.Data)
+ar_data$Virilisation...CAH.Longitudinal.Data <- NULL 
+
+freq(ar_data$Anaemia...Comorbid.Conditions.and.Surgery)
+ar_data$Anaemia...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Anaemia.note...Comorbid.Conditions.and.Surgery)
+ar_data$Anaemia.note...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Depression...Comorbid.Conditions.and.Surgery)
+ar_data$Depression...Comorbid.Conditions.and.Surgery <- NULL 
+
+unique(ar_data$Depression.note...Comorbid.Conditions.and.Surgery)
+ar_data$Depression.note...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Anxiety...Comorbid.Conditions.and.Surgery)
+ar_data$Anxiety...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Anxiety.note...Comorbid.Conditions.and.Surgery)
+ar_data$Anxiety.note...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Psychosis...Comorbid.Conditions.and.Surgery)
+ar_data$Psychosis...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Psychosis.note...Comorbid.Conditions.and.Surgery)
+ar_data$Psychosis.note...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Other.mental.health.problems...Comorbid.Conditions.and.Surgery)
+ar_data$Other.mental.health.problems...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Other.mental.health.problems.note...Comorbid.Conditions.and.Surgery)
+ar_data$Other.mental.health.problems.note...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Joint.hypermobility...Comorbid.Conditions.and.Surgery)
+ar_data$Joint.hypermobility...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Joint.hypermobility.note...Comorbid.Conditions.and.Surgery)
+ar_data$Joint.hypermobility.note...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Other...Comorbid.Conditions.and.Surgery)
+ar_data$Other...Comorbid.Conditions.and.Surgery <- NULL 
+
+unique(ar_data$Other.note...Comorbid.Conditions.and.Surgery)
+ar_data$Other.note...Comorbid.Conditions.and.Surgery <- NULL 
+
+freq(ar_data$Antidiabetic...Current.Medication)
+ar_data$Antidiabetic...Current.Medication <- NULL 
+
+freq(ar_data$Antidiabetic.note...Current.Medication)
+ar_data$Antidiabetic.note...Current.Medication <- NULL 
+
+freq(ar_data$Antidepressants...Current.Medication)
+ar_data$Antidepressants...Current.Medication <- NULL 
+
+unique(ar_data$Antidepressants.note...Current.Medication)
+ar_data$Antidepressants.note...Current.Medication <- NULL 
+
+freq(ar_data$Other.drugs...Current.Medication)
+ar_data$Other.drugs...Current.Medication <- NULL 
+
+unique(ar_data$Other.drugs.note...Current.Medication)
+ar_data$Other.drugs.note...Current.Medication <- NULL 
+
+freq(ar_data$Patient.follow.up.status...Record)
+ar_data$Patient.follow.up.status...Record <- NULL 
+
+freq(ar_data$First.contact.with.centre...Record)
+ar_data$First.contact.with.centre...Record <- NULL 
+
+freq(ar_data$Country.at.birth...Birth)
+ar_data$Country.at.birth...Birth <- NULL 
+
+freq(ar_data$Mid.Parental.Height)
+ar_data$Mid.Parental.Height <- NULL 
+
+sink("colnames_after_removal.txt")
+colnames(ar_data)
+sink()
+
+```
+
+We can now take that forward and load previous decimal ages in the next file to model ages from previous decimal ages for those with spurious dates of birth
+
+```{r, take this file as opportunity to rationalised files being saved}
+rm(ar_participants)
+
+rm(ar_participants_base_data)
+
+rm(ar_participants_longitudinal_data)
+
+rm(ar_labs_wide)
+
+rm(ar_meds_wide)
+
+rm(ar_fludro_wide)
+
+rm(ar_participants_longitudinal_data)
+
+```
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+#save a csv file in this case as we have finally joined, for review
+write.csv(ar_data, "ar_data_after_file_10.csv", row.names=F)
+
+rm(prednisolone_to_hydrocortisone_conversion)
+rm(dexamethasone_to_hydrocortisone_conversion)
+rm(cortisone_acetate_to_hydrocortisone_conversion)
+rm(methylprednisolone_to_hydrocortisone_conversion)
+
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_10")
+
+Sys.time()
+nrow(ar_data)
+
+
+```

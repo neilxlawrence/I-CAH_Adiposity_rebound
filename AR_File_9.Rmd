@@ -1,0 +1,794 @@
+Load packages and reread files using the prebuilt load files function
+
+```{r, load packages}
+rm(list = ls())
+
+#we first establish the location of the working directory where we keep everything, depending on whether it exists (i.e. which computer we are using)
+#check C drive
+#take the working directory otherwise, which should work every time
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- getwd()
+}
+
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_3",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_participants_longitudinal_data"))
+
+load_ar_files_function(previous_file_name = "file_7",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_labs_wide"))
+
+load_ar_files_function(previous_file_name = "file_8",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_meds_wide"))
+```
+
+```{r, establish dates within longitudinal data to create a vector through which to check}
+#we also want to know if that assessment date is present for that patient in ar_participants_longitudinal_data
+ar_participants_longitudinal_visit_dates <-
+  ar_participants_longitudinal_data[,c(
+    "id",
+    "visit_date")]
+
+#rename that to tell us what frame it is coming from
+names(ar_participants_longitudinal_visit_dates)[names(
+  ar_participants_longitudinal_visit_dates)=="visit_date"] <- 
+  "longitudinal_visit_date"
+
+#we don't want to join those, we want to paste them together. then we can simply list the pasted id and longitudinal visit date, and get the other frame to check if the pasted id labs visit date is in that list
+longitudinal_id_visit_dates_vector_to_check <-
+  as.vector(paste0(ar_participants_longitudinal_visit_dates$id,
+                   "_",
+                   ar_participants_longitudinal_visit_dates$longitudinal_visit_date))
+#do a similar vector of just the ids of the patients that are in longitudinal data
+longitudinal_id_vector_to_check <-
+  as.vector(unique(ar_participants_longitudinal_visit_dates$id))
+
+#put that into a frame purely for purposes of loooking inside the console
+longitudinal_id_visit_dates_vector_to_check_frame <- 
+  as.data.frame(longitudinal_id_visit_dates_vector_to_check)
+
+```
+
+
+```{r, load fludro data}
+ar_fludro <- 
+  read.csv(
+    "./2024-01-26_Data_extraction_adiposity_rebound/STUDY Fludro 25.1.24.csv", 
+    header=T, 
+    na.strings="NULL")
+```
+
+```{r, remove completely empty rows}
+print("rows before removing empty rows:")
+nrow(ar_fludro)
+ar_fludro <- 
+  subset(ar_fludro, !is.na(record_id)  | !is.na(assessment_id))
+print("rows after removing empty rows:")
+nrow(ar_fludro)
+```
+
+
+```{r, pull out original versions of columns}
+#create original columns because we manually adjust the values of dates within this file. This original will then allow us to add a flag right at the end any that were adjusted after liaison with centres
+
+ar_fludro$original_assessment_date <-
+  ar_fludro$assessment_date
+
+ar_fludro$original_fludrocortisone_dose <-
+  ar_fludro$fludrocortisone_dose
+
+ar_fludro$original_fludrocortisone_frequency <-
+  ar_fludro$fludrocortisone_frequency
+```
+
+```{r, make administration a number}
+ar_fludro$fludrocortisone_frequency_number <-
+  ifelse(ar_fludro$fludrocortisone_frequency=="once_daily",
+         1,
+         NA)
+
+ar_fludro$fludrocortisone_frequency_number <-
+  ifelse(ar_fludro$fludrocortisone_frequency=="twice_daily",
+         2,
+         ar_fludro$fludrocortisone_frequency_number)
+
+ar_fludro$fludrocortisone_frequency_number <-
+  ifelse(ar_fludro$fludrocortisone_frequency=="three_times_a_day",
+         3,
+         ar_fludro$fludrocortisone_frequency_number)
+```
+
+```{r, order the original frame and reprint it to csv for purposes of manual review}
+ar_fludro_original <- 
+  ar_fludro_original_ordered <- 
+  ar_fludro
+
+ar_fludro_original_ordered <- 
+  ar_fludro_original_ordered[order(
+    ar_fludro_original_ordered$record_id,
+    ar_fludro_original_ordered$assessment_id),] 
+
+write.csv(ar_fludro_original_ordered, "ar_fludro_original_ordered.csv")
+```
+
+```{r, review administration changes}
+#lag the columns for purposes of comparison
+ar_fludro$lag_record_id <-
+  lag(ar_fludro$record_id)
+
+ar_fludro$lag_fludrocortisone_frequency <-
+  lag(ar_fludro$fludrocortisone_frequency)
+
+ar_fludro$same_patient_change_frequency <-
+  ifelse(ar_fludro$record_id==ar_fludro$lag_record_id &
+          ar_fludro$fludrocortisone_frequency!=ar_fludro$lag_fludrocortisone_frequency ,
+         1,
+         0)
+
+fludro_patients_that_change_frequency <-
+  unique(subset(ar_fludro, same_patient_change_frequency==1)$record_id)
+
+ar_fludro_that_shows_frequency_change <-
+  subset(ar_fludro, record_id %in% fludro_patients_that_change_frequency)
+```
+
+**************************************
+Reshaping fludrocortisone data
+**************************************
+
+having a look at this frame, we want to know whether there are multiple entries for the same assessment_id:
+
+```{r, check for multiple assessments with the same assessment id}
+frequency_of_fludro_assessments <- 
+  as.data.frame(freq(ar_fludro$assessment_id))
+
+print("This should just be the total of the frame if we have unique assessment_id:")
+
+#subset(rownames_to_column(frequency_of_fludro_assessments),Freq>1)
+
+print("So the following number should be 0")
+
+nrow(subset(rownames_to_column(frequency_of_fludro_assessments),Freq>1)) -1
+```
+
+this frequency frame shows that each assessment_id in this frame is unique
+
+```{r, removing rows with no data}
+#if both the dose and frequency in this frame are missing, we are gaining nothing, we can't be sure whether they are on fludrocortisone or not, so remove
+ar_fludro$flag_for_removal <-
+  ifelse(is.na(ar_fludro$fludrocortisone_dose) &
+         is.na(ar_fludro$fludrocortisone_frequency),
+         1,
+         0)
+
+ar_fludro_removed <- 
+  subset(ar_fludro, flag_for_removal==1)
+
+print("Number of rows removed for no dose and no frequency of fludrocortisone")
+nrow(ar_fludro_removed)
+
+ar_fludro <- 
+  subset(ar_fludro, flag_for_removal==0)
+```
+
+```{r, automatically assess and remove duplications}
+#for obvious duplications, we will have every column the same except from the assessment_id and the id column
+#thus we paste together the columns
+#then search for those with frequency of more than 2
+ar_fludro$paste_for_duplications <-
+  paste0(
+    ar_fludro$record_id,
+    ar_fludro$assessment_date,
+    ar_fludro$fludrocortisone_dose,
+    ar_fludro$fludrocortisone_frequency,
+    ar_fludro$centreName
+  )
+
+duplication_frequency_more_than_one <-
+  rownames_to_column(subset(as.data.frame(freq(ar_fludro$paste_for_duplications)),
+         Freq>1 & Freq!=("Total")))$rowname
+
+ar_fludro$duplicated_row <- 
+  ifelse(ar_fludro$paste_for_duplications %in% duplication_frequency_more_than_one,
+         1,0)
+print("this is the number of duplicated rows:")
+freq(ar_fludro$duplicated_row)
+
+#then just slice max to take the biggest assessment_id when there is a duplicated row
+ar_fludro_duplications <-
+  subset(ar_fludro, duplicated_row==1)
+ar_fludro_without_duplications_at_all <-
+  subset(ar_fludro, duplicated_row==0)
+#check I haven't lost any
+print("This number should be zero:")
+nrow(ar_fludro_duplications) +
+  nrow(ar_fludro_without_duplications_at_all) -
+  nrow(ar_fludro) 
+#slice_max_the duplications         
+ar_fludro_corrected_without_duplications <-
+  ar_fludro %>%
+  group_by(paste_for_duplications) %>%
+  slice_max(assessment_id)
+print("If the following number isn't zero, check the fludro_frame_frequencies - if there are frequencies over 2 then it won't be zero as more than half of the number of duplications have been removed. In the case of the adiposity rebound data set, this number should be 1:")
+nrow(ar_fludro) -
+  nrow(ar_fludro_corrected_without_duplications) - 
+  nrow(ar_fludro_duplications) / 2
+```
+
+```{r, rationalise the data frame and remove working columns that are used to remove duplicates}
+ar_fludro_corrected_without_duplications$duplicated_row <- NULL
+ar_fludro_corrected_without_duplications$paste_for_duplications <- NULL
+
+ar_fludro <- ar_fludro_corrected_without_duplications
+```
+
+
+```{r, create appropriate variable types and assess for duplicates}
+ar_fludro$visit_date <- 
+  as.POSIXct(ar_fludro$assessment_date, format="%d/%m/%Y")
+
+ar_fludro$id_visit_date <-  
+  paste(ar_fludro$record_id , ar_fludro$visit_date, sep="_")
+
+ar_fludro$id_visit_date <-  
+  as.factor(ar_fludro$id_visit_date)
+
+ar_fludro_freq_id_visit_date <- 
+  as.data.frame(freq(ar_fludro$id_visit_date))
+
+duplicated_ar_fludro_freq_id_visit_dates <- 
+  ar_fludro_freq_id_visit_date %>% filter(Freq > 1) 
+
+duplicated_ar_fludro_freq_id_visit_dates <- 
+  rownames_to_column(duplicated_ar_fludro_freq_id_visit_dates)
+
+duplicated_ar_fludro_freq_id_visit_dates <- 
+  duplicated_ar_fludro_freq_id_visit_dates %>% 
+  filter(rowname  !="Total") %>% 
+  filter (rowname!="<NA>")
+
+duplicated_ar_fludro_freq_id_visit_dates <- 
+  (duplicated_ar_fludro_freq_id_visit_dates$rowname)
+
+duplicated_ar_fludro_data <- 
+  subset(ar_fludro, id_visit_date %in% duplicated_ar_fludro_freq_id_visit_dates)
+
+write.csv(duplicated_ar_fludro_data, "duplicated_ar_fludro_data.csv", row.names = F)
+```
+
+```{r, remove assessment_id}
+unique_duplicated_ar_fludro_data <- 
+  duplicated_ar_fludro_data
+
+unique_duplicated_ar_fludro_data$assessment_id <- 
+  NULL
+
+unique_duplicated_ar_fludro_data <- 
+  unique(unique_duplicated_ar_fludro_data)
+
+nrow(duplicated_ar_fludro_data)
+
+nrow(unique_duplicated_ar_fludro_data)
+
+list_of_id_visit_dates_that_show_duplication <-
+  subset(
+    rownames_to_column(
+      as.data.frame(
+        freq(
+          unique_duplicated_ar_fludro_data$id_visit_date))), 
+    Freq>1 & rowname !="Total")$rowname
+
+list_of_id_visit_dates_that_show_duplication
+```
+
+```{r, print an ordered adjusted version of the frame}
+ar_fludro_wide_adjusted_ordered <- ar_fludro_wide
+
+ar_fludro_wide_adjusted_ordered <- 
+  ar_fludro_wide_adjusted_ordered[order(
+    ar_fludro_wide_adjusted_ordered$id_visit_date,
+    ar_fludro_wide_adjusted_ordered$assessment_id),] 
+
+write.csv(ar_fludro_wide_adjusted_ordered, "ar_fludro_wide_adjusted_ordered.csv")
+```
+
+```{r, remove assessment_id and the other create columns so we can easily remove duplicates that were entered on different days, which are the same data with different assessment_id}
+#pull out a version of the frame before we remove columns
+ar_fludro_wide_adjusted <- 
+  ar_fludro_wide
+
+ar_fludro_wide$assessment_id <- NULL
+
+ar_fludro_wide$lag_record_id <- NULL
+
+ar_fludro_wide$lag_fludrocortisone_frequency <- NULL
+
+ar_fludro_wide$same_patient_change_frequency <- NULL
+
+ar_fludro_wide$flag_for_removal <- NULL
+```
+
+```{r, remove duplicates}
+print("before removal of duplicates")
+
+rows_before_duplicates <- 
+  nrow(ar_fludro_wide)
+
+rows_before_duplicates
+
+ar_fludro_wide <- 
+  unique(ar_fludro_wide)
+
+print("after removal of duplicates:")
+
+rows_after_duplicates <- 
+  nrow(ar_fludro_wide)
+
+rows_after_duplicates
+
+print("rows removed due to exact duplication:")
+
+rows_before_duplicates - rows_after_duplicates
+```
+
+```{r, create total daily fludro dose}
+ar_fludro_wide$total_daily_fludro_dose <- 
+  ifelse(ar_fludro_wide$fludrocortisone_frequency=="once_daily",
+         as.numeric(ar_fludro_wide$fludrocortisone_dose),
+         NA)
+
+ar_fludro_wide$total_daily_fludro_dose <- 
+  ifelse(ar_fludro_wide$fludrocortisone_frequency=="twice_daily",
+         as.numeric(ar_fludro_wide$fludrocortisone_dose)*2,
+         ar_fludro_wide$total_daily_fludro_dose)
+
+ar_fludro_wide$total_daily_fludro_dose <- 
+  ifelse(ar_fludro_wide$fludrocortisone_frequency=="three_times_a_day",
+         as.numeric(ar_fludro_wide$fludrocortisone_dose)*3,
+         ar_fludro_wide$total_daily_fludro_dose)
+```
+
+******************************************************************
+Rendering plots for manual review of dosing frequency changes
+******************************************************************
+recreate this chunk if you want to render the plots, which takes a long time
+```{r, lots of patients that change frequency, so we want to create plots that show the change in frequency}
+#remember, these plots will stay show duplicates
+#note here you can change this to original_assessment_date and original_date_and_time to get what happened before the changes
+all_original_data_to_plot <-
+  rownames_to_column(
+    ar_fludro_original[,c(
+      "record_id",
+      "assessment_id",
+      "assessment_date",
+      "fludrocortisone_dose",
+      "fludrocortisone_frequency_number",
+      "centreName"
+      )])
+
+#note here you can change this to original_assessment_date and original_date_and_time to get what happened before the changes
+all_adjusted_data_to_plot <-
+  rownames_to_column(
+    ar_fludro_wide_adjusted[,c(
+      "record_id",
+      "assessment_id",
+      "assessment_date",
+      "fludrocortisone_dose",
+      "fludrocortisone_frequency_number",
+      "centreName"
+      )])
+
+centre_name_for_plot <- all_adjusted_data_to_plot$centreName[1]
+
+#make the data types appropriate
+all_adjusted_data_to_plot$rowname <- 
+  as.numeric(all_adjusted_data_to_plot$rowname)
+all_original_data_to_plot$rowname <- 
+  as.numeric(all_original_data_to_plot$rowname)
+
+all_adjusted_data_to_plot$fludrocortisone_dose <- 
+  as.numeric(all_adjusted_data_to_plot$fludrocortisone_dose)
+all_original_data_to_plot$fludrocortisone_dose <- 
+  as.numeric(all_original_data_to_plot$fludrocortisone_dose)
+
+all_adjusted_data_to_plot$assessment_date <- 
+  as.POSIXct(all_adjusted_data_to_plot$assessment_date, format="%d/%m/%Y")
+all_original_data_to_plot$assessment_date <- 
+  as.POSIXct(all_original_data_to_plot$assessment_date, format="%d/%m/%Y")
+
+#now I want to plot the assessment date against the fludrocortisone_frequency_number
+print("Total number of patients to render=")
+length(unique(all_adjusted_data_to_plot$record_id))
+
+#make a ggplot
+for(id_to_plot in (1:length(unique(all_adjusted_data_to_plot$record_id)))){
+
+  print("The following number of patients are remaining:")
+  
+  print(length(unique(all_adjusted_data_to_plot$record_id)) - id_to_plot)
+
+  id_to_plot <- unique(all_adjusted_data_to_plot$record_id)[id_to_plot]
+
+  print(paste0("Rendering id: ", id_to_plot))
+
+
+  adjusted_data_to_plot <-
+    subset(all_adjusted_data_to_plot, 
+         record_id==id_to_plot)
+
+  original_data_to_plot <-
+    subset(all_original_data_to_plot, 
+         record_id==id_to_plot)
+
+#check whether the patient is in our vector of patients that change frequency so that we can subdivide the folders later
+patient_has_a_change_in_fludrocortisone_frequency <-
+  ifelse(id_to_plot %in% fludro_patients_that_change_frequency,
+         1,
+         0)
+  
+#render a plot with original data
+original_plot <- 
+  ggplot(data=original_data_to_plot,
+       aes(x=assessment_date, y=fludrocortisone_frequency_number)) +
+  geom_vline(
+    data=subset(ar_participants_longitudinal_visit_dates, 
+                id==id_to_plot),
+    aes(xintercept=longitudinal_visit_date), 
+    colour="green", 
+    linewidth=2,
+    alpha=0.5) +
+  geom_vline(
+    data=subset(original_data_to_plot),
+    aes(xintercept=assessment_date), 
+    colour="blue", 
+    alpha=0.5) +
+  geom_text(aes(label=assessment_id, y=3), 
+            angle=90, 
+            vjust=0,
+            size=0.5) +
+  geom_point(aes(size=fludrocortisone_dose),
+             alpha=0.3) +
+  geom_text(aes(label=fludrocortisone_dose, y=fludrocortisone_frequency_number), 
+            angle=0, 
+            vjust=1,
+            hjust="right",
+            size=4,
+            fontface="bold") +
+  geom_line(aes(), alpha=0.3) +
+  coord_cartesian(ylim=c(0,4)) +
+  labs(title=paste0("Medication data original: Patient ID = ", id_to_plot, ", Centre = ", centre_name_for_plot),
+       subtitle="Thick green line has a longitudinal date, therefore thin blue line on its own is just medication data") +
+  themewithlegend
+
+original_plot  
+
+#render a plot with adjusted data
+adjusted_plot <- 
+  ggplot(data=adjusted_data_to_plot,
+       aes(x=assessment_date, y=fludrocortisone_frequency_number)) +
+  geom_vline(
+    data=subset(ar_participants_longitudinal_visit_dates, 
+                id==id_to_plot),
+    aes(xintercept=longitudinal_visit_date), 
+    colour="green", 
+    linewidth=2,
+    alpha=0.5) +
+  geom_vline(
+    data=subset(adjusted_data_to_plot),
+    aes(xintercept=assessment_date), 
+    colour="blue", 
+    alpha=0.5) +
+  geom_text(aes(label=assessment_id, y=3), 
+            angle=90, 
+            vjust=0,
+            size=0.5) +
+  geom_point(aes(size=fludrocortisone_dose),
+             alpha=0.3) +
+  geom_text(aes(label=fludrocortisone_dose, 
+                y=fludrocortisone_frequency_number), 
+            angle=0, 
+            vjust=1,
+            hjust="right",
+            size=4,
+            fontface="bold") +
+  geom_line(aes(), alpha=0.3) +
+  coord_cartesian(ylim=c(0,4)) +
+  labs(title=paste0("Medication data adjusted: Patient ID = ", id_to_plot, ", Centre = ", centre_name_for_plot),
+       subtitle="Thick green line has a longitudinal date, therefore thin blue line on its own is just medication data") +
+  themewithlegend
+
+adjusted_plot
+
+#create folders to put plots
+dir.create("fludrocortisone_change_of_frequency_plots")
+dir.create("fludrocortisone_change_of_frequency_plots/with_a_change_in_frequency")
+dir.create("fludrocortisone_change_of_frequency_plots/without_a_change_in_frequency")
+dir.create("fludrocortisone_change_of_frequency_plots/with_a_change_in_frequency/adjusted")
+dir.create("fludrocortisone_change_of_frequency_plots/without_a_change_in_frequency/adjusted")
+dir.create("fludrocortisone_change_of_frequency_plots/with_a_change_in_frequency/original")
+dir.create("fludrocortisone_change_of_frequency_plots/without_a_change_in_frequency/original")
+dir.create("fludrocortisone_change_of_frequency_plots/with_a_change_in_frequency/comparison")
+dir.create("fludrocortisone_change_of_frequency_plots/without_a_change_in_frequency/comparison")
+
+#save it in separate folders depending on whether there are visits present not in longitudinal
+if (patient_has_a_change_in_fludrocortisone_frequency==0){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./fludrocortisone_change_of_frequency_plots/without_a_change_in_frequency/adjusted", 
+       plot = adjusted_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+if (patient_has_a_change_in_fludrocortisone_frequency==1){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./fludrocortisone_change_of_frequency_plots/with_a_change_in_frequency/adjusted", 
+       plot = adjusted_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+#save it in separate folders depending on whether there are visits present not in longitudinal
+if (patient_has_a_change_in_fludrocortisone_frequency==0){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./fludrocortisone_change_of_frequency_plots/without_a_change_in_frequency/original", 
+       plot = original_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+if (patient_has_a_change_in_fludrocortisone_frequency==1){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./fludrocortisone_change_of_frequency_plots/with_a_change_in_frequency/original", 
+       plot = original_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, 
+       compression = "lzw", 
+       limitsize=F)
+}
+
+#make a grid_plot
+grid_plot <-
+  grid.arrange(adjusted_plot, 
+               original_plot, 
+               ncol=1)
+
+if (patient_has_a_change_in_fludrocortisone_frequency==0){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./fludrocortisone_change_of_frequency_plots/without_a_change_in_frequency/comparison", 
+       plot = grid_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, #
+       compression = "lzw", 
+       limitsize=F)
+}
+if (patient_has_a_change_in_fludrocortisone_frequency==1){
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".tif"), 
+       path="./fludrocortisone_change_of_frequency_plots/with_a_change_in_frequency/comparison", 
+       plot = grid_plot, 
+       device="tiff",  
+       width=10, 
+       height=5, #
+       compression = "lzw", 
+       limitsize=F)
+}
+
+}
+sink("fludrocortisone_change_of_frequency_plots/a_instructions_to_review_fludrocortisone_change_of_frequency_plots.txt")
+
+print("Look through fludrocortisone_change_of_frequency_plots/with_a_change_in_frequency. These plots are all individual patients. They show the size of the points to be the dose, and the y axis shows number of administrations. We are looking for lines that go up and have a bigger point - this may suggest that the patient has a greater frequency, but that the person entering the data means that they are taking that much TOTAL dose, divided over the number of frequencies. Then clarify with centre.")
+
+sink()
+```
+
+```{r, give the ar_fludro_wide visits a binary code, so when joined we can see when the data wasnt present in each sub frame, and refine the centre name}
+ar_fludro_wide$visit_in_fludro_data <- 1
+
+ar_fludro_wide$fludro_centre_name <- ar_fludro_wide$centreName
+```
+
+I want to know if all the ar_fludro id_visit_dates's are in the main frame. so take
+
+```{r, assess id_visit_date frequencies}
+fludro_frame_frequencies <- 
+  subset(
+    rownames_to_column(
+      as.data.frame(
+        freq(
+          ar_fludro_wide$id_visit_date))),
+            rowname!="<NA>" & 
+            rowname!="Total")
+```
+
+```{r, find number of fludrocortisone entries not in our main extraction frame with other meds and labs and report what has happened in this file to missing dose and frequency}
+print("Exact duplications that were adjusted:")
+
+print("before removal of duplicates")
+rows_before_duplicates
+
+print("after removal of duplicates:")
+rows_after_duplicates
+
+print("rows removed due to exact duplication:")
+rows_before_duplicates - rows_after_duplicates
+
+print("id_visit_date in fludro but not in the longitudinal data frame")
+nrow(subset(ar_fludro_wide, 
+            !(id_visit_date %in% ar_participants_longitudinal_data$id_visit_date)))
+
+print("id_visit_date in labs frame but not in fludro")
+nrow(subset(ar_labs_wide, 
+            !(id_visit_date %in% ar_fludro_wide$id_visit_date)))
+
+print("id_visit_date in meds frame but not in fludro")
+nrow(subset(ar_meds_wide, 
+            !(id_visit_date %in% ar_fludro_wide$id_visit_date)))
+
+print("Number of rows removed for no dose and no frequency of fludrocortisone")
+nrow(ar_fludro_removed)
+
+print("the following should be 1 to declare we don't have any id_visit_date duplications")
+
+max(fludro_frame_frequencies$Freq)
+
+print("If that is more than 1, then we need to review the following id_visit_dates:")
+subset(rownames_to_column(as.data.frame(freq(ar_fludro_wide$id_visit_date))), Freq>1)$rowname
+```
+
+```{r, %% number of fludrocortisone assessment_dates changed}
+ar_fludro_wide$assessment_date_changed <-
+  ifelse(ar_fludro_wide$assessment_date !=
+  ar_fludro_wide$original_assessment_date |
+         is.na(ar_fludro_wide$assessment_date) &
+           !is.na(ar_fludro_wide$original_assessment_date) |
+         !is.na(ar_fludro_wide$assessment_date) &
+           is.na(ar_fludro_wide$original_assessment_date),
+         1,
+         0)
+
+print("Number of visits with manually corrected assessment_date")
+sum(ar_fludro_wide$assessment_date_changed, na.rm=T)
+
+print("Number of visits with missing assessment_date")
+sum(is.na(ar_fludro_wide$original_assessment_date), na.rm=T)
+
+print("Number of visits with assessment_date")
+sum(!is.na(ar_fludro_wide$assessment_date_changed), na.rm=T)
+
+print("Total number of rows in original fludrocortisone data prior to insertion and then removal of duplications")
+
+nrow(ar_fludro_original)
+
+print("Total number of rows in fludrocortisone data without duplications")
+
+nrow(ar_fludro_wide)
+
+print("Total number of rows removed")
+
+nrow(ar_fludro_original) - nrow(ar_fludro_wide)
+
+```
+
+
+```{r, %% number of fludrocortisone fludrocortisone_dose changed}
+ar_fludro_wide$fludrocortisone_dose_changed <-
+  ifelse(ar_fludro_wide$fludrocortisone_dose !=
+  ar_fludro_wide$original_fludrocortisone_dose |
+         is.na(ar_fludro_wide$fludrocortisone_dose) &
+           !is.na(ar_fludro_wide$original_fludrocortisone_dose) |
+         !is.na(ar_fludro_wide$fludrocortisone_dose) &
+           is.na(ar_fludro_wide$original_fludrocortisone_dose),
+         1,
+         0)
+
+print("Number of visits with manually corrected fludrocortisone_dose")
+sum(ar_fludro_wide$fludrocortisone_dose_changed, na.rm=T)
+
+print("Number of visits with missing fludrocortisone_dose")
+sum(is.na(ar_fludro_wide$original_fludrocortisone_dose), na.rm=T)
+
+print("Number of visits with fludrocortisone_dose")
+sum(!is.na(ar_fludro_wide$fludrocortisone_dose_changed), na.rm=T)
+
+print("Total number of rows in original fludrocortisone data prior to insertion and then removal of duplications")
+
+nrow(ar_fludro_original)
+
+print("Total number of rows in fludrocortisone data without duplications")
+nrow(ar_fludro_wide)
+
+print("Total number of rows removed")
+nrow(ar_fludro_original) - nrow(ar_fludro_wide)
+
+```
+
+
+```{r, %% number of fludrocortisone fludrocortisone_frequency changed}
+ar_fludro_wide$fludrocortisone_frequency_changed <-
+  ifelse(ar_fludro_wide$fludrocortisone_frequency !=
+  ar_fludro_wide$original_fludrocortisone_frequency |
+         is.na(ar_fludro_wide$fludrocortisone_frequency) &
+           !is.na(ar_fludro_wide$original_fludrocortisone_frequency) |
+         !is.na(ar_fludro_wide$fludrocortisone_frequency) &
+           is.na(ar_fludro_wide$original_fludrocortisone_frequency),
+         1,
+         0)
+
+print("Number of visits with manually corrected fludrocortisone_frequency")
+sum(ar_fludro_wide$fludrocortisone_frequency_changed, na.rm=T)
+
+print("Number of visits with missing fludrocortisone_frequency")
+sum(is.na(ar_fludro_wide$original_fludrocortisone_frequency), na.rm=T)
+
+print("Number of visits with fludrocortisone_frequency")
+sum(!is.na(ar_fludro_wide$fludrocortisone_frequency_changed), na.rm=T)
+
+print("Total number of rows in original fludrocortisone data prior to insertion and then removal of duplications")
+
+nrow(ar_fludro_original)
+
+print("Total number of rows in fludrocortisone data without duplications")
+nrow(ar_fludro_wide)
+
+print("Total number of rows removed")
+nrow(ar_fludro_original) - nrow(ar_fludro_wide)
+
+```
+
+
+```{r, tidy fludrocortisone frame ready for joining}
+ar_fludro_wide <-
+  ar_fludro_wide[,c(
+    "id_visit_date",
+    "visit_in_fludro_data",
+    "fludro_centre_name",
+    "fludrocortisone_dose",
+    "fludrocortisone_frequency_number",
+    "total_daily_fludro_dose"
+  )]
+```
+
+```{r, remove frames we havent done anything with to prevent them saving}
+rm(ar_labs_wide )
+
+rm(ar_medication )
+
+rm(ar_meds_wide )
+
+rm(ar_participants_longitudinal_data )
+```
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_9")
+Sys.time()
+```

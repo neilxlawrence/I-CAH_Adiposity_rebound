@@ -1,0 +1,649 @@
+Load packages and reread files using the prebuilt load files function
+
+```{r, load software packages}
+rm(list = ls())
+
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_11",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data",
+                                   "ar_previous_extraction_joined_to_model"))
+```
+
+```{r, create difference_between_decimal_age_and_calculated_age_from_new_extraction_dob, the age_at_visit_from_manually_corrected_dob - decimal age previously input}
+#create new calculated age from the dob we have from the new extraction
+ar_previous_extraction_joined_to_model$age_at_visit_from_manually_corrected_dob <- 
+  as.numeric(
+    difftime(
+      ar_previous_extraction_joined_to_model$visit_date, 
+      ar_previous_extraction_joined_to_model$manually_corrected_dob,
+      units="days")/
+      365.25)
+
+#calculate difference between the decimal age and the new calculated age
+ar_previous_extraction_joined_to_model$difference_between_decimal_age_and_calculated_age_from_new_extraction_dob <- 
+  ar_previous_extraction_joined_to_model$age_at_visit_from_manually_corrected_dob -
+  as.numeric(ar_previous_extraction_joined_to_model$decimal_age_at_visit)
+
+```
+
+```{r, plot the difference_between_decimal_age_and_calculated_age_from_new_extraction_dob on decimal_age_at_visit }
+dob_modelling_plot <- 
+  ggplot(data=ar_previous_extraction_joined_to_model, 
+         aes(x=decimal_age_at_visit, 
+             y=difference_between_decimal_age_and_calculated_age_from_new_extraction_dob)) + 
+  
+  geom_point(size=0.1) +
+  
+  facet_wrap(~id) + 
+  
+  geom_smooth(method="lm", se=F) +  
+  
+  themenolegend + 
+  
+  coord_cartesian(ylim=c(-1.5, 1.5)) 
+
+ggsave(filename="dob_modelling_plot.tif", 
+       path=".", 
+       plot = dob_modelling_plot, device="tiff",  width=100, height=50, 
+       compression = "lzw", limitsize=F)
+```
+
+```{r, create a frame with the number of visits for each id}
+#now we can take ar_previous_extraction_joined_to_model
+number_of_visits_per_patient <- 
+  subset(rownames_to_column(
+    as.data.frame(freq(ar_previous_extraction_joined_to_model$id))), 
+         rowname!= "Total" & 
+           rowname!="<NA>")
+
+number_of_visits_per_patient <- 
+  data.frame(
+    id=number_of_visits_per_patient$rowname,
+    visits=number_of_visits_per_patient$Freq)
+```
+
+```{r, loops of individual patient models of difference between decimal age and real DOB}
+#skip this whole thing if we don't have previous data
+if(length(number_of_visits_per_patient$id)>0){
+  
+#set null frames to bind to
+decimal_age_modelling_results <- NULL
+
+decimal_age_is_an_outlier_frame_bound <- NULL
+#define our residual threshold
+residualthreshold <- 2.5
+
+for (patient in number_of_visits_per_patient$id){
+
+individual_patient_frame_first_iteration <- 
+  subset(ar_previous_extraction_joined_to_model, id==patient)
+  
+  #print the patient and number of visits to the console to review progress
+  print(paste0("patient number: ", patient))
+  
+  print(paste0("number of visits: ", nrow(individual_patient_frame_first_iteration)))
+  
+  #you can't do this on people who only have one observation, so we use if to only do it if they have more than 1 row
+  
+  if (nrow(individual_patient_frame_first_iteration)>1) {
+  
+  #fit a linear model with flat sloped
+  linear_model_first_iteration <- 
+    lm(data=individual_patient_frame_first_iteration, 
+          formula=difference_between_decimal_age_and_calculated_age_from_new_extraction_dob~1)
+  
+  #calculate the standardised residuals of the points and add them to the individual_patient_frame_first_iteration
+  standard_res <- 
+    individual_patient_frame_first_iteration$standard_res <-
+    rstandard(linear_model_first_iteration)
+  
+  #create a data frame of the maximum and minimum standardised residuals
+  standardised_residuals_of_dec_age_for_this_id <- 
+    data.frame(
+      id = patient,
+               
+      manually_corrected_dob = individual_patient_frame_first_iteration[1,"manually_corrected_dob"],
+               
+      spurious_original_dob_code = individual_patient_frame_first_iteration[1,"spurious_original_dob_code"],
+               
+      spurious_manually_corrected_dob_code =
+        individual_patient_frame_first_iteration[1,"spurious_manually_corrected_dob_code"],
+               
+      n_visits_in_martin_frame = nrow(individual_patient_frame_first_iteration),
+               
+      max_stan_res_1st_iteration = max(standard_res),
+               
+      min_stan_res_1st_iteration = min(standard_res),
+               
+      range_stan_res_1st_iteration = max(standard_res)-min(standard_res)
+               )
+  }
+  
+  #create if there are no rows in the inidvidual_patient_frame then we can assign zero to the residuals, to ensure the patient has a row in the collected frame
+  if (nrow(individual_patient_frame_first_iteration)<=1) {  
+   standard_res <- 0   
+    standardised_residuals_of_dec_age_for_this_id <- 
+      data.frame(
+        id=patient,
+                 
+        manually_corrected_dob = individual_patient_frame_first_iteration[1,"manually_corrected_dob"],
+               
+        spurious_original_dob_code = individual_patient_frame_first_iteration[1,"spurious_original_dob_code"],
+        
+        spurious_manually_corrected_dob_code =
+          individual_patient_frame_first_iteration[1,"spurious_manually_corrected_dob_code"],
+                 
+        n_visits_in_martin_frame=nrow(individual_patient_frame_first_iteration),
+                 
+        min_stan_res_1st_iteration = 0,
+                 
+        max_stan_res_1st_iteration = 0,
+                 
+        range_stan_res_1st_iteration = 0
+                 )
+  }
+  
+  #subset out visits from the patient where the standardised residual is over threshold
+  decimal_age_is_an_outlier_visits_1st_iteration <- 
+    subset(individual_patient_frame_first_iteration, 
+           standard_res > residualthreshold | 
+           standard_res < -1*residualthreshold)
+  
+  #collect the id_visit_date and standard_res AND decimal_age_at_visit into a frame. Remember that in this frame, we don't necessarily have id_visit_date that is unique if multiple decimal_age_outlier are present, but we want to use them all and find out which ones are outliers / take the average of them
+  
+  if (nrow(decimal_age_is_an_outlier_visits_1st_iteration) > 0) {
+    print("decimal age is an outlier in the 1st iteration")
+  outlier_id_visits_1st_iteration <- 
+    decimal_age_is_an_outlier_visits_1st_iteration[,c(
+      "id_visit_date", 
+      "spurious_original_dob_code",
+      "spurious_manually_corrected_dob_code",
+      "standard_res",
+      "decimal_age_at_visit")]
+  
+  #add an iteration_removed column to this frame so we know at what iteration the value got removed
+  outlier_id_visits_1st_iteration$iteration_removed <- 1
+  }
+  
+  #create a null frame if this visit didn't result in any outliers, so we have something to join
+  if (nrow(decimal_age_is_an_outlier_visits_1st_iteration) == 0) {
+  outlier_id_visits_1st_iteration <- data.frame(NULL)
+  }
+  
+  #collect the number of outliers at this 1st iteration that there are and add it to the standardised_residuals_of_dec_age_for_this_id frame
+  standardised_residuals_of_dec_age_for_this_id$number_outlier_dec_ages_1st_iteration <-
+    nrow(decimal_age_is_an_outlier_visits_1st_iteration)
+  
+  #then we do the same again having removed outliers as a second iteration. subset out the patient visits without the excessive standardised residuals
+  individual_patient_frame_second_iteration <- 
+    subset(individual_patient_frame_first_iteration, 
+              standard_res < residualthreshold & 
+              standard_res > -1*residualthreshold)
+  
+  if (nrow(individual_patient_frame_second_iteration) > 1){ 
+    
+  #fit the linear model again to remaining patients  
+  linear_model_second_iteration <- 
+    lm(data = individual_patient_frame_second_iteration, 
+       formula = difference_between_decimal_age_and_calculated_age_from_new_extraction_dob ~ 1)  
+  
+  #calculate the standardised residuals again and add them to the frame
+  standard_res <- 
+    individual_patient_frame_second_iteration$standard_res <- 
+    rstandard(linear_model_second_iteration)
+  
+  #calculate the minimum and maximum residueals to add to the frame
+  standardised_residuals_of_dec_age_for_this_id$min_stan_res_2nd_iteration <- 
+    min(standard_res)
+  standardised_residuals_of_dec_age_for_this_id$max_stan_res_2nd_iteration <- 
+    max(standard_res)
+  standardised_residuals_of_dec_age_for_this_id$range_stan_res_2nd_iteration <- 
+    max(standard_res)-min(standard_res)
+  }
+  
+  if (nrow(individual_patient_frame_second_iteration) <= 1){
+    
+  standardised_residuals_of_dec_age_for_this_id$max_stan_res_2nd_iteration <- 0
+  
+  standardised_residuals_of_dec_age_for_this_id$min_stan_res_2nd_iteration <- 0
+  
+  standardised_residuals_of_dec_age_for_this_id$range_stan_res_2nd_iteration <- 0
+  
+  }   
+  
+  decimal_age_is_an_outlier_visits_2nd_iteration <- 
+    subset(individual_patient_frame_second_iteration, 
+           standard_res > residualthreshold | 
+             standard_res < -1*residualthreshold)
+  
+  if (nrow(decimal_age_is_an_outlier_visits_2nd_iteration)>0){
+  
+  outlier_id_visits_2nd_iteration <- 
+    decimal_age_is_an_outlier_visits_2nd_iteration[,c(
+      "id_visit_date", 
+      "spurious_original_dob_code",
+      "spurious_manually_corrected_dob_code",
+      "standard_res",
+      "decimal_age_at_visit")]  
+  
+  outlier_id_visits_2nd_iteration$iteration_removed <- 
+    2
+  
+  standardised_residuals_of_dec_age_for_this_id$number_outlier_dec_ages_2nd_iteration <- 
+    nrow(outlier_id_visits_2nd_iteration)  
+  
+  }
+  
+  if (nrow(decimal_age_is_an_outlier_visits_2nd_iteration)==0){
+  
+    standardised_residuals_of_dec_age_for_this_id$number_outlier_dec_ages_2nd_iteration <- 0  
+  
+    outlier_id_visits_2nd_iteration <- data.frame(NULL)
+    
+  }
+  
+  #then we do the same again having removed outliers
+  
+  individual_patient_frame_third_iteration <- 
+    subset(individual_patient_frame_second_iteration, 
+           standard_res < residualthreshold & 
+             standard_res > -1*residualthreshold)
+  
+  if (nrow(individual_patient_frame_third_iteration)>1){
+    
+  linear_model_third_iteration <- 
+    lm(data = individual_patient_frame_third_iteration, 
+                     formula = difference_between_decimal_age_and_calculated_age_from_new_extraction_dob ~ 1)  
+
+  standard_res <-
+    individual_patient_frame_third_iteration$standard_res <- rstandard(linear_model_third_iteration)
+  
+  standardised_residuals_of_dec_age_for_this_id$min_stan_res_3rd_iteration <- min(standard_res)
+  
+  standardised_residuals_of_dec_age_for_this_id$max_stan_res_3rd_iteration <- max(standard_res)
+  
+  standardised_residuals_of_dec_age_for_this_id$range_stan_res_3rd_iteration <- max(standard_res)-min(standard_res)
+  
+  }
+  
+  if (nrow(individual_patient_frame_third_iteration)<=1){
+  
+    standardised_residuals_of_dec_age_for_this_id$max_stan_res_3rd_iteration <- 0
+  
+    standardised_residuals_of_dec_age_for_this_id$min_stan_res_3rd_iteration <- 0
+  
+    standardised_residuals_of_dec_age_for_this_id$range_stan_res_3rd_iteration <- 0
+    
+  } 
+  
+  decimal_age_is_an_outlier_visits_3rd_iteration <- 
+    subset(individual_patient_frame_third_iteration, 
+           standard_res > residualthreshold | 
+             standard_res < -1*residualthreshold)
+  
+  if (nrow(decimal_age_is_an_outlier_visits_3rd_iteration)>0){
+  
+  outlier_id_visits_3rd_iteration <- 
+    decimal_age_is_an_outlier_visits_3rd_iteration[,c(
+      "id_visit_date", 
+      "spurious_original_dob_code",
+      "spurious_manually_corrected_dob_code",
+      "standard_res",
+      "decimal_age_at_visit")]    
+  
+  outlier_id_visits_3rd_iteration$iteration_removed <- 3
+  
+  standardised_residuals_of_dec_age_for_this_id$number_outlier_dec_ages_3rd_iteration <- 
+    nrow(outlier_id_visits_3rd_iteration)  
+  
+  }
+  
+  if (nrow(decimal_age_is_an_outlier_visits_3rd_iteration)==0){
+  
+    standardised_residuals_of_dec_age_for_this_id$number_outlier_dec_ages_3rd_iteration <- 0 
+  
+    outlier_id_visits_3rd_iteration <- data.frame(NULL)
+  
+    }
+  
+  #then we do the same again having removed outliers
+  individual_patient_frame_fourth_iteration <- 
+    subset(individual_patient_frame_third_iteration, 
+           standard_res < residualthreshold & standard_res > -1*residualthreshold)
+  
+  nrow(individual_patient_frame_fourth_iteration)
+  
+  if (nrow(individual_patient_frame_fourth_iteration)>1){  
+    
+  linear_model_fourth_iteration <- lm(data = individual_patient_frame_fourth_iteration, 
+                     formula = difference_between_decimal_age_and_calculated_age_from_new_extraction_dob ~ 1)  
+
+  standard_res <- 
+    individual_patient_frame_fourth_iteration$standard_res <-
+    rstandard(linear_model_fourth_iteration)
+  
+  standardised_residuals_of_dec_age_for_this_id$min_stan_res_4th_iteration <- 
+    min(standard_res)
+  
+  standardised_residuals_of_dec_age_for_this_id$max_stan_res_4th_iteration <- 
+    max(standard_res)
+  
+  standardised_residuals_of_dec_age_for_this_id$range_stan_res_4th_iteration <- 
+    max(standard_res) - min(standard_res)
+  }
+  
+  if (nrow(individual_patient_frame_fourth_iteration)<=1){
+    
+  standardised_residuals_of_dec_age_for_this_id$min_stan_res_4th_iteration <- 0
+  
+  standardised_residuals_of_dec_age_for_this_id$max_stan_res_4th_iteration <- 0
+  
+  standardised_residuals_of_dec_age_for_this_id$range_stan_res_4th_iteration <- 0
+  
+  }  
+  
+  decimal_age_is_an_outlier_visits_4th_iteration <- 
+    subset(individual_patient_frame_fourth_iteration, 
+           standard_res > residualthreshold | 
+             standard_res < -1*residualthreshold)
+  
+  if (nrow(decimal_age_is_an_outlier_visits_4th_iteration)>0){  
+    
+  outlier_id_visits_4th_iteration <- 
+    decimal_age_is_an_outlier_visits_4th_iteration[,c(
+      "id_visit_date", 
+      "spurious_original_dob_code",
+      "spurious_manually_corrected_dob_code",
+      "standard_res",
+      "decimal_age_at_visit")] 
+  
+  outlier_id_visits_4th_iteration$iteration_removed <- 4
+  
+  standardised_residuals_of_dec_age_for_this_id$number_outlier_dec_ages_4th_iteration <- 
+    nrow(outlier_id_visits_4th_iteration)  
+  
+  }
+  
+  if (nrow(decimal_age_is_an_outlier_visits_4th_iteration)==0){
+    
+  standardised_residuals_of_dec_age_for_this_id$number_outlier_dec_ages_4th_iteration <- 
+    0  
+  
+  outlier_id_visits_4th_iteration <- data.frame(NULL)
+  
+  }
+  
+#now we have linear_modelXXXiteration, ONLY if there were enough observations left following removal, otherwise we have to go back an iteration) with an intercept that is the average difference between the age_at_visit_from_manually_corrected_dob, and the decimal ages. We want to pull  out that intercept
+  
+  
+  if (nrow(individual_patient_frame_fourth_iteration)>1){  
+  standardised_residuals_of_dec_age_for_this_id$average_years_decimal_ages_over_manually_corrected_dob <- 
+    coef(linear_model_fourth_iteration)["(Intercept)"]
+  }
+
+  if (nrow(individual_patient_frame_fourth_iteration)<=1){  
+    if (nrow(individual_patient_frame_third_iteration)>1){
+    standardised_residuals_of_dec_age_for_this_id$average_years_decimal_ages_over_manually_corrected_dob <- 
+      coef(linear_model_third_iteration)["(Intercept)"]
+    }
+    
+    if (nrow(individual_patient_frame_third_iteration)<=1){  
+      if (nrow(individual_patient_frame_second_iteration)>1){
+      standardised_residuals_of_dec_age_for_this_id$average_years_decimal_ages_over_manually_corrected_dob <- 
+        coef(linear_model_second_iteration)["(Intercept)"]
+      }
+      
+      if (nrow(individual_patient_frame_second_iteration)<=1){
+        if (nrow(individual_patient_frame_first_iteration)>1){
+        standardised_residuals_of_dec_age_for_this_id$average_years_decimal_ages_over_manually_corrected_dob <- 
+          coef(linear_model_first_iteration)["(Intercept)"]
+        }
+        
+        if (nrow(individual_patient_frame_first_iteration)<=1){
+          standardised_residuals_of_dec_age_for_this_id$average_years_decimal_ages_over_manually_corrected_dob <- 0
+}}}}
+  
+#we then bind all the iteration frames to collect results
+  
+#collect all the id_visit_dates that had outliers that we removed, and the residual values that got them removed
+
+nrow(outlier_id_visits_4th_iteration)
+
+outlier_id_visits <- rbind(
+  outlier_id_visits_1st_iteration,
+  outlier_id_visits_2nd_iteration,
+  outlier_id_visits_3rd_iteration,
+  outlier_id_visits_4th_iteration
+  )
+
+decimal_age_modelling_results <- 
+  rbind(decimal_age_modelling_results, 
+        standardised_residuals_of_dec_age_for_this_id)
+
+decimal_age_is_an_outlier_frame_bound <- 
+  rbind(decimal_age_is_an_outlier_frame_bound, 
+        outlier_id_visits)  
+}
+
+print("following this loop we have the frame decimal_age_modelling_results which has one row for each id, and then a column with number_outlier_dec_ages_1st_iteration and so on for 2nd 3rd and 4th iterations. It also has the standardised residuals for each that were removed. We also have decimal_age_is_an_outlier_frame_bound which tells us specifically which id_visit_date and decimal_age_at_visit was declared an outlier.")
+}
+```
+
+```{r, calculate modelling_corrected_dob and total number of outliers removed}
+#skip this whole thing if we don't have previous data
+if(length(number_of_visits_per_patient$id)>0){
+  
+  #we have a number of years that the decimal ages are consistently over the manually_corrected_dob average_years_decimal_ages_over_manually_corrected_dob . Therefore the modelling_corrected_dob should be the manually_corrected_dob + average_years_decimal_ages_over_manually_corrected_dob
+decimal_age_modelling_results$average_days_decimal_ages_over_manually_corrected_dob <-
+  as.integer(
+    decimal_age_modelling_results$average_years_decimal_ages_over_manually_corrected_dob * 
+      365.25)
+
+#to do this we want to use lubridate and add a number of days
+decimal_age_modelling_results$modelling_corrected_dob <-
+  as.Date(decimal_age_modelling_results$manually_corrected_dob) +
+  decimal_age_modelling_results$average_days_decimal_ages_over_manually_corrected_dob
+
+decimal_age_modelling_results$total_decimal_age_is_an_outliers_removed <- 
+  decimal_age_modelling_results$number_outlier_dec_ages_1st_iteration +
+  decimal_age_modelling_results$number_outlier_dec_ages_2nd_iteration +
+  decimal_age_modelling_results$number_outlier_dec_ages_3rd_iteration +
+  decimal_age_modelling_results$number_outlier_dec_ages_4th_iteration
+
+write.csv(
+  decimal_age_modelling_results, 
+  paste0("decimal_age_modelling_results_from_residual_threshold_", 
+  residualthreshold, 
+  ".csv"),
+  row.names = F)  
+
+
+outlying_patients_in_martin_frame_to_manually_review <-
+  unique(subset(decimal_age_modelling_results, 
+       average_years_decimal_ages_over_manually_corrected_dob> 1 | 
+       average_years_decimal_ages_over_manually_corrected_dob < -1)$id)
+outlying_patients_in_martin_frame_to_manually_review
+
+previous_extraction <- 
+  read.csv("./2025_02_14_AR_other_csv_files_to_load/previous_updated_ar_centre_names.csv")
+
+previous_extraction_to_review <-
+  subset(
+    previous_extraction, 
+    Register.ID %in% outlying_patients_in_martin_frame_to_manually_review)
+
+previous_extraction_to_review <-
+  unique(previous_extraction_to_review[,c(
+    "Register.ID",
+    "Date.of.Birth",
+    "Date",
+    "Age.at.date.of.visit")])
+
+write.csv(previous_extraction_to_review, 
+          "previous_extraction_to_review.csv", 
+          row.names = F)
+}
+```
+
+```{r, check our modelled dates of birth against the non_spurious dates of birth that we have access to}
+#skip this whole thing if we don't have previous data
+if(length(number_of_visits_per_patient$id)>0){
+  
+  decimal_age_modelling_results_to_view <-
+  decimal_age_modelling_results[,c(
+    "id",
+    "n_visits_in_martin_frame",
+    "total_decimal_age_is_an_outliers_removed",
+    "spurious_original_dob_code",
+    "spurious_manually_corrected_dob_code",
+    "manually_corrected_dob",
+    "modelling_corrected_dob",
+    "average_years_decimal_ages_over_manually_corrected_dob")]
+
+a <- subset(decimal_age_modelling_results_to_view,
+             spurious_manually_corrected_dob_code==0)
+descr(a$average_years_decimal_ages_over_manually_corrected_dob)
+
+a <- subset(decimal_age_modelling_results_to_view,
+             spurious_original_dob_code==0)
+descr(a$average_years_decimal_ages_over_manually_corrected_dob)
+
+decimal_age_modelling_results_may_be_better_than_non_spurious <-
+  subset(decimal_age_modelling_results_to_view,
+         n_visits_in_martin_frame>4 &
+         average_years_decimal_ages_over_manually_corrected_dob > 0.1 &
+         spurious_manually_corrected_dob_code==0   |
+         n_visits_in_martin_frame>4 &
+         average_years_decimal_ages_over_manually_corrected_dob < -0.1 &
+         spurious_manually_corrected_dob_code==0 )
+
+print("the list of patients to review when contacting centres flagged by this methodology is:")
+decimal_age_modelling_results_may_be_better_than_non_spurious$id
+}
+```
+
+```{r, join dob modelled from decimal age}
+#skip this whole thing if we don't have previous data
+if(length(number_of_visits_per_patient$id)>0){
+decimal_age_modelling_results_to_join <-
+  decimal_age_modelling_results[,c(
+    "id",
+    "n_visits_in_martin_frame",
+    "total_decimal_age_is_an_outliers_removed",
+    "modelling_corrected_dob",
+    "average_years_decimal_ages_over_manually_corrected_dob")]
+}
+if(length(number_of_visits_per_patient$id)==0){
+decimal_age_modelling_results_to_join <-
+  data.frame(
+    id=integer(0),
+    n_visits_in_martin_frame=numeric(0),
+    total_decimal_age_is_an_outliers_removed=numeric(0),
+    modelling_corrected_dob=POSIXct(0),
+    average_years_decimal_ages_over_manually_corrected_dob=numeric(0))
+}
+
+decimal_age_modelling_results_to_join$id <- 
+  as.integer(decimal_age_modelling_results_to_join$id)
+
+
+ar_data_with_modelling_corrected_dob <-
+  left_join(ar_data,
+            decimal_age_modelling_results_to_join,
+            by="id")
+
+```
+
+
+```{r, adjust modelling_corrected_dob for earliest_visit_date}
+those_with_corrected_first_visit_modelled_dob <-
+  subset(ar_data_with_modelling_corrected_dob,
+         modelling_corrected_dob > earliest_visit_date)
+
+unique(those_with_corrected_first_visit_modelled_dob$id)
+
+ar_data_with_modelling_corrected_dob$modelling_corrected_dob <-
+  ifelse(
+    ar_data_with_modelling_corrected_dob$earliest_visit_date < 
+      ar_data_with_modelling_corrected_dob$modelling_corrected_dob,
+    as.character(ar_data_with_modelling_corrected_dob$earliest_visit_date),
+    as.character(ar_data_with_modelling_corrected_dob$modelling_corrected_dob)
+  )
+
+str(ar_data_with_modelling_corrected_dob$modelling_corrected_dob)
+```
+
+
+```{r, check the join isnt duplicating rows}
+print("original frame had this many rows:")
+nrow(ar_data)
+
+print("I joined this many rows:")
+nrow(decimal_age_modelling_results_to_join)
+
+print("This should say zero to prove I haven't duplicated rows")
+nrow(ar_data_with_modelling_corrected_dob) - nrow(ar_data)
+
+#then I can rationalise the data frame name
+ar_data <- 
+  ar_data_with_modelling_corrected_dob
+```
+
+```{r, summary of the number of decimal age outliers removed}
+sum(
+  !is.na(
+    subset(ar_data, spurious_manually_corrected_dob_code==1)$
+      n_visits_in_martin_frame))
+
+#extract one row for each patient from our final frame, to find out the total number of outliers we removed
+ar_data_summary_of_martin_data_that_was_joined <-
+  unique(ar_data[,c(
+    "id",
+    "n_visits_in_martin_frame",
+    "total_decimal_age_is_an_outliers_removed",
+    "spurious_manually_corrected_dob_code",
+    "modelling_corrected_dob",
+    "average_years_decimal_ages_over_manually_corrected_dob")])
+
+print(sum(!is.na(subset(ar_data_summary_of_martin_data_that_was_joined,
+                  spurious_manually_corrected_dob_code==1)$total_decimal_age_is_an_outliers_removed)))
+```
+
+```{r, check spuriosity}
+freq(ar_data$spurious_manually_corrected_dob_code)
+freq(ar_data$spurious_original_dob_code)
+```
+
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_12")
+Sys.time()
+```
+
+

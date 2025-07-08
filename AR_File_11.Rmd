@@ -1,0 +1,342 @@
+
+Load packages and reread files using the prebuilt load files function
+
+```{r, load software packages}
+rm(list = ls())
+
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_10",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+```
+
+***********************************
+Summarising the Centres with data
+************************************
+
+We want to include all centre authors so let's print the centres
+
+```{r, Summarising the Centres with data}
+dir.create("codeprints")
+write.csv(as.data.frame(freq(ar_data$Centre.Name...Centre)), 
+          "codeprints/participatingcentres.csv")
+
+```
+
+
+```{r, load previous_extraction_20200311 and create appropriately named variables of interest}
+previous_extraction_20200311 <- 
+  read.csv("./2025_02_14_AR_other_csv_files_to_load/previous_extraction.csv")
+
+#create an appropriate id column
+previous_extraction_20200311$id <- 
+  as.integer(previous_extraction_20200311$Register.ID)
+
+length(unique(previous_extraction_20200311$id)) - 
+  length(unique(previous_extraction_20200311$Register.ID))
+
+#conver to numeric
+previous_extraction_20200311$decimal_age_at_visit <-
+  as.numeric(previous_extraction_20200311$Age.at.date.of.visit)
+
+#convert visit to character to allow any manual adjustments after liaison with centres (using posix within ifelse causes problems)
+previous_extraction_20200311$visit_date <- 
+  as.character(previous_extraction_20200311$Date)
+```
+
+
+
+
+
+```{r, convert visit date back to posix}
+#then after our ifelse statements we convert to posixct
+previous_extraction_20200311$visit_date <- 
+  as.POSIXct(previous_extraction_20200311$visit_date, format="%Y-%m-%d")
+```
+
+```{r, turn decimal age into a number and process the date of birth in the previous extraction into R format}
+previous_extraction_20200311$dob_calculated_from_decimal_age <- 
+  previous_extraction_20200311$visit_date - 
+  (as.numeric(previous_extraction_20200311$decimal_age_at_visit) * 60 * 60 * 24 * 365.25)
+
+#this gives us a mixture of dates that are exact, and dates that have a time so we need to sort that out
+previous_extraction_20200311$calculated_date_of_birth_character <- 
+  as.character(previous_extraction_20200311$dob_calculated_from_decimal_age)
+
+previous_extraction_20200311$calculated_date_of_birth_character <- 
+  gsub(previous_extraction_20200311$calculated_date_of_birth_character, 
+       pattern=" .*", 
+       replacement="")
+
+previous_extraction_20200311$calculated_date_of_birth_posix <-
+  as.POSIXct(previous_extraction_20200311$calculated_date_of_birth_character)
+
+previous_extraction_20200311$dob_calculated_from_decimal_age <- 
+  previous_extraction_20200311$calculated_date_of_birth_posix 
+
+#create id_visit_date to join our separate decimal ages as well
+
+previous_extraction_20200311$id_visit_date <- 
+  paste(previous_extraction_20200311$id , 
+        previous_extraction_20200311$visit_date, sep="_")
+
+previous_extraction_20200311$month_of_birth <- 
+  format(as.Date(previous_extraction_20200311$visit_date, format="%Y-%m-%d"),
+         "%m")
+
+previous_extraction_20200311$day_of_birth <- 
+  format(as.Date(previous_extraction_20200311$visit_date, format="%Y-%m-%d"),
+         "%d")
+
+previous_extraction_20200311$year_of_birth <- 
+  format(as.Date(previous_extraction_20200311$visit_date, format="%Y-%m-%d"),
+         "%Y")
+```
+
+```{r, calculate minimum and maximum date of births from decimal ages in previous_extraction_20200311}
+previous_extraction_20200311_to_slice <- 
+  previous_extraction_20200311[,c(
+    "id", 
+    "dob_calculated_from_decimal_age")]
+
+print("percentage of rows in previous extraction that have age recorded as NULL:")
+
+subset(rownames_to_column(as.data.frame(freq(previous_extraction_20200311$decimal_age_at_visit))), 
+       rowname=="NULL")$`% Valid`
+
+a <- rownames_to_column(as.data.frame(freq(previous_extraction_20200311$decimal_age_at_visit)))
+print("total rows in previous extraction that have age recorded as NULL or 'age' instead of a number:")
+total_number_of_rows_without_age <-
+  subset(rownames_to_column(as.data.frame(freq(previous_extraction_20200311$decimal_age_at_visit))), 
+         rowname=="NULL")$`Freq` +
+  subset(rownames_to_column(as.data.frame(freq(previous_extraction_20200311$decimal_age_at_visit))), 
+         rowname=="age")$`Freq` +
+  subset(rownames_to_column(as.data.frame(freq(previous_extraction_20200311$decimal_age_at_visit))), 
+         rowname=="<NA>")$`Freq`
+
+previous_extraction_20200311_to_slice <- 
+  previous_extraction_20200311_to_slice[!is.na(previous_extraction_20200311_to_slice$dob_calculated_from_decimal_age),]
+
+#total number of rows in the original extraction minus the rows without an age
+nrow(previous_extraction_20200311) - 
+  total_number_of_rows_without_age - 
+  #should be the same as the total number of rows in the slice  
+  nrow(previous_extraction_20200311_to_slice)
+
+print("This number should be zero to show that we are trying to join all possible decimal ages that we have access to before the registry platform changed")
+
+previous_extraction_dob_max_to_join <-
+  previous_extraction_20200311_to_slice %>% 
+  group_by(id) %>% 
+  slice_max(dob_calculated_from_decimal_age, 
+            n=1, 
+            with_ties=F)
+
+names(previous_extraction_dob_max_to_join)[
+  names(previous_extraction_dob_max_to_join)=="dob_calculated_from_decimal_age"] <-
+  "dob_calculated_from_decimal_age_max"
+
+previous_extraction_dob_min_to_join <- 
+  previous_extraction_20200311_to_slice %>% 
+  group_by(id) %>% 
+  slice_min(dob_calculated_from_decimal_age, n=1 , with_ties=F)
+
+names(previous_extraction_dob_min_to_join)[
+  names(previous_extraction_dob_min_to_join)=="dob_calculated_from_decimal_age"] <-
+  "dob_calculated_from_decimal_age_min"
+
+#join the minimum and maximum dates of birth together
+previous_extraction_min_max_dob_to_join <- 
+  dplyr::left_join(previous_extraction_dob_max_to_join,
+                   previous_extraction_dob_min_to_join, 
+                   by="id"  )
+
+#calculate the range between minimum and maximum calculated dates of birth
+previous_extraction_min_max_dob_to_join$range_of_previous_extraction_calculated_dates_of_birth <- 
+  as.numeric(difftime(previous_extraction_min_max_dob_to_join$dob_calculated_from_decimal_age_max, 
+                      previous_extraction_min_max_dob_to_join$dob_calculated_from_decimal_age_min, 
+                      units="days"))/365.25
+
+
+```
+
+```{r, subset previous_extraction data ready to join}
+#in order to join the previous_extraction data, we need it to have an ID and we need it to have an age at visit, and we need it to have a date of visit, so subset those out
+previous_extraction_20200311_decimal_age_to_join <- 
+  subset(previous_extraction_20200311, 
+         !is.na(id) &
+         !is.na(decimal_age_at_visit)  &
+         !is.na(visit_date) & 
+         decimal_age_at_visit!="NULL")
+
+print("Number of visits from previous_extraction's final extraction that are available to join:")
+nrow(previous_extraction_20200311_decimal_age_to_join)
+
+#take out only the columns we want
+previous_extraction_20200311_decimal_age_to_join <- 
+  previous_extraction_20200311_decimal_age_to_join[,c(
+    "id",
+    "visit_date",
+    "id_visit_date",
+    "decimal_age_at_visit", 
+    "dob_calculated_from_decimal_age"
+    )]
+
+#join in the minimum and maximum to that frame and make unique
+previous_extraction_20200311_to_join <-
+  unique(left_join(
+    previous_extraction_20200311_decimal_age_to_join,
+    previous_extraction_min_max_dob_to_join,
+    by="id"))
+  
+nrow(previous_extraction_20200311_decimal_age_to_join)
+
+print("was joined by")
+
+nrow(previous_extraction_min_max_dob_to_join)
+
+print("to create ")
+
+nrow(previous_extraction_20200311_to_join)
+```
+
+```{r, take necessary columns from our recent extraction to join, as unique}
+ar_dob_data_to_join <-
+  unique(ar_data[,c(
+    "id",
+    "spurious_original_dob_code",
+    "spurious_manually_corrected_dob_code",
+    "manually_corrected_dob",
+    "earliest_visit_date")])
+
+print("check the number of rows with more than 1 ID, this should just be the total of the frequencies and therefore this number should be zero:")
+
+nrow(subset(as.data.frame(freq(ar_dob_data_to_join$id)), Freq>1)) - 1
+
+```
+
+```{r, join the previous extraction to the ar_dob_data_to_join}
+ar_previous_extraction_joined_to_model <-
+  left_join(
+    previous_extraction_20200311_to_join,
+    ar_dob_data_to_join,
+    by="id"
+  )
+ar_previous_extraction_joined_to_model$manually_corrected_dob <-
+  as.POSIXct(ifelse(is.na(ar_previous_extraction_joined_to_model$manually_corrected_dob),
+         ar_previous_extraction_joined_to_model$dob_calculated_from_decimal_age_min,
+         ar_previous_extraction_joined_to_model$manually_corrected_dob))
+
+ar_previous_extraction_joined_to_model$spurious_original_dob_code <-
+  ifelse(is.na(ar_previous_extraction_joined_to_model$spurious_original_dob_code),
+         1,
+         ar_previous_extraction_joined_to_model$spurious_original_dob_code)
+
+ar_previous_extraction_joined_to_model$spurious_manually_corrected_dob_code <-
+  ifelse(is.na(ar_previous_extraction_joined_to_model$spurious_manually_corrected_dob_code),
+         1,
+         ar_previous_extraction_joined_to_model$spurious_manually_corrected_dob_code)
+
+nrow(subset(as.data.frame(freq(ar_previous_extraction_joined_to_model$id_visit_date)), Freq>1))
+
+multiple_visits_from_previous_extraction_20200311 <- 
+  subset(ar_previous_extraction_joined_to_model,
+            id_visit_date %in%
+            rownames(subset(as.data.frame(freq(ar_previous_extraction_joined_to_model$id_visit_date)), Freq>1)))
+
+```
+
+
+```{r, subset previous_extraction data ready to join}
+ar_previous_extraction_joined_to_model$decimal_age_at_visit <-
+  as.numeric(ar_previous_extraction_joined_to_model$decimal_age_at_visit)
+```
+
+```{r, relate possible dates of birth to earliest visit date to establish any impossible dates of birth}
+#establish the difference between the the minimum date of birth and the earliest visit date
+ar_previous_extraction_joined_to_model$diff_time_calced_dob_min_more_than_earliest_visit_date <- 
+  difftime(ar_previous_extraction_joined_to_model$dob_calculated_from_decimal_age_min,
+           ar_previous_extraction_joined_to_model$earliest_visit_date)
+
+ar_previous_extraction_joined_to_model$diff_time_calced_dob_max_more_than_earliest_visit_date <- 
+  difftime(ar_previous_extraction_joined_to_model$dob_calculated_from_decimal_age_max,
+           ar_previous_extraction_joined_to_model$earliest_visit_date)
+
+ar_previous_extraction_joined_to_model$calculated_min_impos_as_post_1st_visit <- 
+  ifelse(ar_previous_extraction_joined_to_model$diff_time_calced_dob_min_more_than_earliest_visit_date > 0, 
+         1, 
+         0)
+
+#if the calculated_min dob is impossible, we change it to the earliest visit data
+ar_previous_extraction_joined_to_model$dob_calculated_from_decimal_age_min <-
+  as.POSIXct(ifelse(ar_previous_extraction_joined_to_model$calculated_min_impos_as_post_1st_visit==1,
+         ar_previous_extraction_joined_to_model$earliest_visit_date,
+         ar_previous_extraction_joined_to_model$dob_calculated_from_decimal_age_min))
+
+ar_previous_extraction_joined_to_model$calculated_max_impos_as_post_1st_visit <- 
+  ifelse(ar_previous_extraction_joined_to_model$diff_time_calced_dob_max_more_than_earliest_visit_date > 0, 
+         1, 
+         0)
+
+#if the calculated_max dob is impossible, we change it to the earliest visit data
+ar_previous_extraction_joined_to_model$dob_calculated_from_decimal_age_max <-
+  as.POSIXct(ifelse(ar_previous_extraction_joined_to_model$calculated_max_impos_as_post_1st_visit==1,
+         ar_previous_extraction_joined_to_model$earliest_visit_date,
+         ar_previous_extraction_joined_to_model$dob_calculated_from_decimal_age_max))
+
+calculated_dob_corrected_check_frame <- 
+  ar_previous_extraction_joined_to_model[,c(
+    "id", 
+    "manually_corrected_dob", 
+    "earliest_visit_date", 
+    "dob_calculated_from_decimal_age_min", 
+    "dob_calculated_from_decimal_age_max", 
+    "calculated_min_impos_as_post_1st_visit", 
+    "calculated_max_impos_as_post_1st_visit", 
+    "diff_time_calced_dob_min_more_than_earliest_visit_date", 
+    "diff_time_calced_dob_max_more_than_earliest_visit_date"
+    )]
+
+write.csv(calculated_dob_corrected_check_frame, 
+          "calculated_dob_corrected_check_frame.csv")
+```
+
+that leaves us with ar_previous_extraction_joined_to_model
+
+```{r, remove frames not necessary to save}
+rm(previous_extraction_20200311_decimal_age_to_join)
+```
+
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_11")
+
+Sys.time()
+```
+
+
