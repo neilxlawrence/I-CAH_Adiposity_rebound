@@ -1,0 +1,613 @@
+
+
+```{r, load software packages}
+rm(list = ls())
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_21",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+
+
+load_ar_files_function(previous_file_name = "file_24",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list(
+    "male_random_effects_weight_metrics",
+    "fema_random_effects_weight_metrics"
+    ))
+
+load_ar_files_function(previous_file_name = "file_26",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list(
+    "male_random_effects_height_metrics",
+    "fema_random_effects_height_metrics"
+    ))
+
+```
+
+
+```{r}
+results <- 
+  anthroplus::anthroplus_zscores(
+   sex =                
+     1,
+   age_in_months =      
+     18 * 12,
+   height_in_cm =       
+     100,
+   weight_in_kg =       
+     10
+)$zbfa
+
+fema_random_effects_weight_height_and_bmi$who_z_sitar_derived_bmi_at_18 <-
+  anthroplus::anthroplus_zscores(
+   sex =                
+     2,
+   age_in_months =      
+     18 * 12,
+   height_in_cm =       
+     fema_random_effects_weight_height_and_bmi$sitar_height_at_age_18,
+   weight_in_kg =       
+     fema_random_effects_weight_height_and_bmi$sitar_weight_at_age_18
+)$zbfa
+```
+
+```{r}
+boys_who_bmi_2_5 <-
+  read.csv("WHO adiposity rebound data/bmi_boys_2-to-5-years_zscores.csv")
+boys_who_bmi_5_19 <-
+  read.csv("WHO adiposity rebound data/bmi-boys-z-who-2007-exp.csv")
+girls_who_bmi_2_5 <-
+  read.csv("WHO adiposity rebound data/bmi_girls_2-to-5-years_zscores.csv")
+girls_who_bmi_5_19 <-
+  read.csv("WHO adiposity rebound data/bmi-girls-z-who-2007-exp.csv")
+
+boys_who_bmi <- bind_rows(
+  boys_who_bmi_2_5,
+  boys_who_bmi_5_19
+)
+girls_who_bmi <- bind_rows(
+  girls_who_bmi_2_5,
+  girls_who_bmi_5_19
+)
+```
+
+
+```{r}
+boys_who_bmi <- 
+  boys_who_bmi %>%
+        mutate(
+          years_to_next_reading = 
+            (lead(Month) - Month)/12,
+          SD0_bmi_to_next_reading = 
+            lead(SD0) - SD0,
+          SD0_bmi_velocity_to_next_reading = 
+            SD0_bmi_to_next_reading / years_to_next_reading)
+
+boys_who_bmi <- boys_who_bmi %>%
+  mutate(
+    adiposity_rebound = ifelse(
+      lag(SD0_bmi_to_next_reading) < 0 & SD0_bmi_to_next_reading >= 0,
+      1,
+      0
+    )
+  )
+
+SD0_boys_age_at_adiposity_rebound <- 
+  subset(
+    boys_who_bmi, adiposity_rebound==1
+  )$Month / 12
+SD0_boys_age_at_adiposity_rebound
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Helper function to process one dataset (boys or girls)
+process_adiposity_rebound <- function(bmi_df, sex_label = "Male") {
+  # Convert to long format
+  long_bmi <- bmi_df %>%
+    pivot_longer(
+      cols = starts_with("SD"),
+      names_to = "Z_score",
+      values_to = "BMI"
+    ) %>%
+    arrange(Z_score, Month) %>%
+    mutate(Sex = sex_label)
+  
+  # Detect adiposity rebound for each Z-score curve
+  long_bmi <- long_bmi %>%
+    group_by(Sex, Z_score) %>%
+    arrange(Month, .by_group = TRUE) %>%
+    mutate(
+      years_to_next = (lead(Month) - Month) / 12,
+      bmi_to_next = lead(BMI) - BMI,
+      velocity = bmi_to_next / years_to_next,
+      adiposity_rebound = ifelse(lag(lag(bmi_to_next)) < 0 & lag(bmi_to_next) < 0 & bmi_to_next >= 0, 1, 0)
+    ) %>%
+    ungroup()
+  
+  return(long_bmi)
+}
+
+# Process both boys and girls
+boys_long <- process_adiposity_rebound(boys_who_bmi, sex_label = "Male")
+girls_long <- process_adiposity_rebound(girls_who_bmi, sex_label = "Female")
+
+# Combine
+bmi_long_all <- bind_rows(boys_long, girls_long)
+
+# Extract age at adiposity rebound
+ar_ages <- bmi_long_all %>%
+  filter(adiposity_rebound == 1) %>%
+  mutate(age_years = Month / 12) %>%
+  dplyr::select(Sex, Z_score, Month, age_years, BMI)
+
+# Preview AR ages
+print(ar_ages)
+
+# Optional: Plot for both sexes
+ggplot(bmi_long_all, aes(x = Month / 12, y = BMI, color = Z_score)) +
+  geom_line(size = 1.2) +
+  geom_point(
+    data = filter(bmi_long_all, adiposity_rebound == 1),
+    aes(x = Month / 12, y = BMI),
+    color = "black", fill = "yellow", size = 3, shape = 21
+  ) +
+  facet_wrap(~Sex) +
+  labs(
+    title = "Adiposity Rebound by Z-score Curve (WHO BMI-for-age)",
+    x = "Age (years)", y = "BMI (kg/m²)", color = "Z-score"
+  ) +
+  theme_minimal(base_size = 14)
+
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Helper function: robust trough detection
+process_adiposity_rebound <- function(bmi_df, sex_label = "Male") {
+  
+  long_bmi <- bmi_df %>%
+    pivot_longer(
+      cols = starts_with("SD"),
+      names_to = "Z_score",
+      values_to = "BMI"
+    ) %>%
+    arrange(Z_score, Month) %>%
+    mutate(Sex = sex_label)
+  
+  # Identify local minima
+  long_bmi <- long_bmi %>%
+    group_by(Sex, Z_score) %>%
+    arrange(Month, .by_group = TRUE) %>%
+    mutate(
+      prev_bmi = lag(BMI),
+      next_bmi = lead(BMI),
+      is_trough = BMI < prev_bmi & BMI < next_bmi
+    ) %>%
+    # In case of flat troughs (BMI == prev and next), handle those too
+    mutate(
+      is_flat_trough = (BMI == prev_bmi & BMI < next_bmi) |
+                       (BMI == next_bmi & BMI < prev_bmi)
+    ) %>%
+    mutate(adiposity_rebound = ifelse(is_trough | is_flat_trough, 1, 0)) %>%
+    ungroup()
+  
+  return(long_bmi)
+}
+
+# Apply to both sexes
+boys_long <- process_adiposity_rebound(boys_who_bmi, sex_label = "Male")
+girls_long <- process_adiposity_rebound(girls_who_bmi, sex_label = "Female")
+
+# Combine
+bmi_long_all <- bind_rows(boys_long, girls_long)
+
+# Extract age at adiposity rebound
+ar_ages <- bmi_long_all %>%
+  filter(adiposity_rebound == 1) %>%
+  group_by(Sex, Z_score) %>%
+  slice_min(BMI, with_ties = FALSE) %>%  # Pick the lowest rebound only
+  mutate(age_years = Month / 12) %>%
+  dplyr::select(Sex, Z_score, Month, age_years, BMI)
+
+print(ar_ages)
+
+
+ggplot(bmi_long_all, aes(x = Month / 12, y = BMI, color = Z_score)) +
+  geom_line(size = 1.1) +
+  geom_point(
+    data = filter(bmi_long_all, adiposity_rebound == 1),
+    aes(x = Month / 12, y = BMI),
+    color = "black", fill = "yellow", size = 3, shape = 21
+  ) +
+  facet_wrap(~Sex) +
+  labs(
+    title = "Adiposity Rebound by Z-score Curve (WHO BMI-for-age)",
+    x = "Age (years)", y = "BMI (kg/m²)", color = "Z-score"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+
+```{r}
+#manually extract the lowest bmi after grouping by 
+
+bmi_long_all_minimums <-
+  bmi_long_all %>%
+  group_by(Z_score, Sex) %>%
+  slice_min(n=1, with_ties = F, BMI)
+
+print(" bmi_long_all_minimums is what contains all the z score adiposity rebounds")
+
+print("z-score -2")
+male_SD2neg_age_adiposity_rebound <-
+  subset(bmi_long_all_minimums, 
+         Z_score=="SD2neg" &
+         Sex=="Male")$Month / 12
+male_SD2neg_age_adiposity_rebound
+print("z-score -1")
+male_SD1neg_age_adiposity_rebound <-
+  subset(bmi_long_all_minimums, 
+         Z_score=="SD1neg" &
+         Sex=="Male")$Month / 12
+male_SD1neg_age_adiposity_rebound
+print("z-score 0")
+male_SD0_age_adiposity_rebound <-
+  subset(bmi_long_all_minimums, 
+         Z_score=="SD0" &
+         Sex=="Male")$Month / 12
+male_SD0_age_adiposity_rebound
+print("z-score 1")
+male_SD1_age_adiposity_rebound <-
+  subset(bmi_long_all_minimums, 
+         Z_score=="SD1" &
+         Sex=="Male")$Month / 12
+male_SD1_age_adiposity_rebound
+print("z-score 2")
+male_SD2_age_adiposity_rebound <-
+  subset(bmi_long_all_minimums, 
+         Z_score=="SD2" &
+         Sex=="Male")$Month / 12
+male_SD2_age_adiposity_rebound
+```
+
+
+
+
+
+```{r}
+find_adiposity_rebound <- function(bmi_data) {
+  bmi_data <- bmi_data %>%
+    group_by(Sex, Z_score) %>%
+    arrange(Month) %>%
+    mutate(
+      bmi_lead1 = lead(BMI, 1),
+      bmi_lead2 = lead(BMI, 2),
+      bmi_lead3 = lead(BMI, 3),
+      bmi_lag1 = lag(BMI, 1),
+      bmi_lag2 = lag(BMI, 2),
+      bmi_lag3 = lag(BMI, 3)
+    ) %>%
+    mutate(
+      is_rebound = BMI < bmi_lag1 & BMI < bmi_lag2 & BMI < bmi_lag3 &
+                   BMI < bmi_lead1 & bmi_lead1 < bmi_lead2 & bmi_lead2 < bmi_lead3
+    ) %>%
+    filter(is_rebound) %>%
+    slice_min(BMI, with_ties = FALSE) %>%  # choose first/min
+    ungroup()
+  
+  return(bmi_data)
+}
+
+boys_rebound <- find_adiposity_rebound(boys_long)
+girls_rebound <- find_adiposity_rebound(girls_long)
+
+rebounds_all <- bind_rows(boys_rebound, girls_rebound)
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+detect_troughs <- function(bmi_vec) {
+  n <- length(bmi_vec)
+  troughs <- logical(n)
+  
+  for (i in 2:(n-1)) {
+    prev <- bmi_vec[i-1]
+    curr <- bmi_vec[i]
+    next <- bmi_vec[i+1]
+    
+    if (curr < prev && curr < next) {
+      # strict trough
+      troughs[i] <- TRUE
+    } else if (curr == prev || curr == next) {
+      # check for flat troughs
+      # find plateau edges
+      left <- i
+      while (left > 1 && bmi_vec[left] == bmi_vec[left-1]) left <- left - 1
+      right <- i
+      while (right < n && bmi_vec[right] == bmi_vec[right+1]) right <- right + 1
+      
+      # check neighbors outside plateau
+      left_neighbor <- ifelse(left > 1, bmi_vec[left-1], Inf)
+      right_neighbor <- ifelse(right < n, bmi_vec[right+1], Inf)
+      
+      if (bmi_vec[i] < left_neighbor && bmi_vec[i] < right_neighbor) {
+        # plateau lower than neighbors
+        troughs[left:right] <- TRUE
+      }
+    }
+  }
+  
+  return(troughs)
+}
+
+```
+
+```{r}
+process_adiposity_rebound <- function(bmi_df, sex_label = "Male") {
+  long_bmi <- bmi_df %>%
+    pivot_longer(
+      cols = starts_with("SD"),
+      names_to = "Z_score",
+      values_to = "BMI"
+    ) %>%
+    arrange(Z_score, Month) %>%
+    mutate(Sex = sex_label)
+  
+  long_bmi <- long_bmi %>%
+    group_by(Sex, Z_score) %>%
+    arrange(Month, .by_group = TRUE) %>%
+    mutate(
+      is_trough = detect_troughs(BMI)
+    ) %>%
+    mutate(adiposity_rebound = ifelse(is_trough, 1, 0)) %>%
+    ungroup()
+  
+  return(long_bmi)
+}
+```
+
+```{r}
+detect_troughs <- function(bmi_vec) {
+  n <- length(bmi_vec)
+  troughs <- rep(FALSE, n)
+  
+  # If vector too short or all NA, return all FALSE
+  if (n < 3 || all(is.na(bmi_vec))) {
+    return(troughs)
+  }
+  
+  # For safe indexing, replace NA with Inf (so no troughs there)
+  bmi_vec_noNA <- ifelse(is.na(bmi_vec), Inf, bmi_vec)
+  
+  for (i in 2:(n-1)) {
+    prev <- bmi_vec_noNA[i-1]
+    curr <- bmi_vec_noNA[i]
+    next <- bmi_vec_noNA[i+1]
+    
+    # skip if current is NA (Inf now)
+    if (curr == Inf) next
+    
+    if (curr < prev && curr < next) {
+      troughs[i] <- TRUE
+    } else if (curr == prev || curr == next) {
+      # find plateau edges
+      left <- i
+      while (left > 1 && bmi_vec_noNA[left] == bmi_vec_noNA[left-1]) left <- left - 1
+      right <- i
+      while (right < n && bmi_vec_noNA[right] == bmi_vec_noNA[right+1]) right <- right + 1
+      
+      left_neighbor <- ifelse(left > 1, bmi_vec_noNA[left-1], Inf)
+      right_neighbor <- ifelse(right < n, bmi_vec_noNA[right+1], Inf)
+      
+      if (bmi_vec_noNA[i] < left_neighbor && bmi_vec_noNA[i] < right_neighbor) {
+        troughs[left:right] <- TRUE
+      }
+    }
+  }
+  
+  return(troughs)
+}
+
+```
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(zoo)
+
+# ---- Robust Trough Detection ----
+detect_troughs <- function(bmi_vec) {
+  n <- length(bmi_vec)
+  if (n < 3 || all(is.na(bmi_vec))) return(rep(FALSE, n))
+  
+  bmi_vec_noNA <- ifelse(is.na(bmi_vec), Inf, bmi_vec)
+  troughs <- rep(FALSE, n)
+  
+  for (i in 2:(n - 1)) {
+    prev <- bmi_vec_noNA[i - 1]
+    curr <- bmi_vec_noNA[i]
+    nxt  <- bmi_vec_noNA[i + 1]
+    
+    if (curr < prev && curr < nxt) {
+      troughs[i] <- TRUE
+    } else if (curr == prev || curr == nxt) {
+      left <- i
+      while (left > 1 && bmi_vec_noNA[left] == bmi_vec_noNA[left - 1]) left <- left - 1
+      right <- i
+      while (right < n && bmi_vec_noNA[right] == bmi_vec_noNA[right + 1]) right <- right + 1
+      
+      left_neighbor <- ifelse(left > 1, bmi_vec_noNA[left - 1], Inf)
+      right_neighbor <- ifelse(right < n, bmi_vec_noNA[right + 1], Inf)
+      
+      if (curr < left_neighbor && curr < right_neighbor) {
+        troughs[left:right] <- TRUE
+      }
+    }
+  }
+  return(troughs)
+}
+
+# ---- Main Processing Function ----
+process_adiposity_rebound <- function(bmi_df, sex_label = "Male", window = 3) {
+  
+  bmi_long <- bmi_df %>%
+    pivot_longer(cols = starts_with("SD"), names_to = "Z_score", values_to = "BMI") %>%
+    arrange(Z_score, Month) %>%
+    mutate(Sex = sex_label) %>%
+    group_by(Sex, Z_score) %>%
+    arrange(Month, .by_group = TRUE) %>%
+    mutate(
+      BMI_smooth = zoo::rollapply(BMI, width = window, FUN = mean, fill = NA, align = "center", partial = TRUE),
+      is_trough = detect_troughs(BMI_smooth),
+      adiposity_rebound = ifelse(is_trough, 1, 0)
+    ) %>%
+    ungroup()
+  
+  return(bmi_long)
+}
+
+# ---- Apply to boys and girls data ----
+boys_long <- process_adiposity_rebound(boys_who_bmi, sex_label = "Male")
+girls_long <- process_adiposity_rebound(girls_who_bmi, sex_label = "Female")
+
+# ---- Combine both sexes ----
+bmi_long_all <- bind_rows(boys_long, girls_long)
+
+# ---- Extract Age of Adiposity Rebound ----
+ar_ages <- bmi_long_all %>%
+  filter(adiposity_rebound == 1) %>%
+  group_by(Sex, Z_score) %>%
+  slice_min(BMI_smooth, with_ties = FALSE) %>%
+  mutate(age_years = Month / 12) %>%
+  dplyr::select(Sex, Z_score, Month, age_years, BMI_smooth)
+
+print(ar_ages)
+
+# ---- Plot ----
+ggplot(bmi_long_all, aes(x = Month / 12, y = BMI_smooth, color = Z_score)) +
+  geom_line(size = 1.1) +
+geom_point(
+  data = ar_ages,
+  aes(x = age_years, y = BMI_smooth),
+  color = "black", fill = "yellow", size = 3, shape = 21
+) +
+  facet_wrap(~Sex) +
+  labs(
+    title = "Adiposity Rebound by Z-score Curve (WHO BMI-for-age)",
+    x = "Age (years)",
+    y = "Smoothed BMI (kg/m²)",
+    color = "Z-score"
+  ) +
+  theme_minimal(base_size = 14)
+
+```
+
+
+That's bollocks, I need to do it myself
+```{r}
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(ggplot2)
+
+# Function to fit splines and predict values for one dataset (boys or girls)
+fit_spline_for_sex <- function(df, sex_label, z_scores = c("SD2neg", "SD1neg", "SD0", "SD1", "SD2"), months_out = seq(24, 240, by = 1)) {
+  map_dfr(z_scores, function(z) {
+    fit <- smooth.spline(x = df$Month, y = df[[z]], spar = 0.5)
+    pred <- predict(fit, x = months_out)
+    
+    tibble(
+      Month = pred$x,
+      BMI = pred$y,
+      Z_score = z,
+      Sex = sex_label
+    )
+  })
+}
+
+# Fit for boys and girls
+predicted_boys <- fit_spline_for_sex(boys_who_bmi, "Male")
+predicted_girls <- fit_spline_for_sex(girls_who_bmi, "Female")
+
+# Combine into one tidy frame
+predicted_bmi_long <- bind_rows(predicted_boys, predicted_girls)
+
+ggplot(predicted_bmi_long, aes(x = Month / 12, y = BMI, color = Z_score)) +
+  geom_line(size = 1) +
+  facet_wrap(~ Sex) +
+  labs(
+    title = "Smoothed WHO BMI Curves (Boys & Girls)",
+    x = "Age (years)",
+    y = "BMI (kg/m²)",
+    color = "Z-score"
+  ) +
+  theme_minimal(base_size = 14)
+
+
+```
+
+```{r}
+library(dplyr)
+
+adiposity_rebound_ages <- predicted_bmi_long %>%
+  group_by(Sex, Z_score) %>%
+  slice_min(order_by = BMI, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# View result
+adiposity_rebound_ages_male <- 
+  subset(adiposity_rebound_ages, Sex=="Male")
+
+```
+
+
+
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+rm(ar_data)
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_29")
+Sys.time()
+```

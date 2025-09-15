@@ -1,0 +1,121 @@
+
+
+```{r, load software packages}
+rm(list = ls())
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_30",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+```
+
+
+```{r}
+  
+descr(ar_data_patient$visit_number)
+descr(ar_data_patient$age_to_use)
+freq(ar_data_patient$sex_1_for_M_2_for_F)
+```
+
+
+```{r, NUMBER OF VISITS}
+nrow(ar_data)
+nrow(ar_data_visits_male)
+nrow(ar_data_visits_fema)
+```
+
+
+```{r}
+descr(ar_data_patient$Father.s.height..cm....Family)
+descr(ar_data_patient$Mother.s.height..cm....Family)
+```
+```{r, number of patients}
+nrow(ar_data_patient)
+cat("Male:")
+nrow(ar_data_patient_male)
+cat("Fema:")
+nrow(ar_data_patient_fema)
+```
+
+```{r}
+cat("All BMI:")
+sum(!is.na(ar_data_patient$a_bmi))
+round(sum(!is.na(ar_data_patient$a_bmi))/nrow(ar_data_patient)*100, 1)
+cat("%")
+
+
+cat("All Height:")
+sum(!is.na(ar_data_patient$a_height))
+round(sum(!is.na(ar_data_patient$a_height))/nrow(ar_data_patient)*100, 1)
+cat("%")
+
+cat("All Weight:")
+sum(!is.na(ar_data_patient$a_weight))
+round(sum(!is.na(ar_data_patient$a_weight))/nrow(ar_data_patient)*100, 1)
+cat("%")
+
+```
+
+
+```{r, proportions with random effects}
+cat("Male BMI:")
+sum(!is.na(ar_data_patient_male$a_bmi))
+round(sum(!is.na(ar_data_patient_male$a_bmi))/nrow(ar_data_patient_male)*100, 1)
+cat("%")
+
+cat("Fema BMI:")
+sum(!is.na(ar_data_patient_fema$a_bmi))
+round(sum(!is.na(ar_data_patient_fema$a_bmi))/nrow(ar_data_patient_fema)*100, 1)
+cat("%")
+
+
+cat("Male Height:")
+sum(!is.na(ar_data_patient_male$a_height))
+round(sum(!is.na(ar_data_patient_male$a_height))/nrow(ar_data_patient_male)*100, 1)
+cat("%")
+cat("Fema Height:")
+sum(!is.na(ar_data_patient_fema$a_height))
+round(sum(!is.na(ar_data_patient_fema$a_height))/nrow(ar_data_patient_fema)*100, 1)
+cat("%")
+
+cat("Male Weight:")
+sum(!is.na(ar_data_patient_male$a_weight))
+round(sum(!is.na(ar_data_patient_male$a_weight))/nrow(ar_data_patient_male)*100, 1)
+cat("%")
+cat("Fema Weight:")
+sum(!is.na(ar_data_patient_fema$a_weight))
+round(sum(!is.na(ar_data_patient_fema$a_weight))/nrow(ar_data_patient_fema)*100, 1)
+cat("%")
+
+
+```
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+rm(ar_data)
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_32")
+Sys.time()
+```

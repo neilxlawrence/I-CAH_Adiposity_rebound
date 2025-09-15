@@ -1,0 +1,175 @@
+
+
+```{r, load software packages}
+rm(list = ls())
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_30",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+```
+
+
+```{r, DELETE THIS CHUNK AFTER YOUVE RUN THROUGH BEYOND 20th FEBRUARY 2025 AS IT IS A REPEAT CALCULATION FROM FILE 13}
+ar_data$earliest_visit_age <-
+  as.numeric(
+    difftime(ar_data$earliest_visit_date, 
+             ar_data$dob_to_use, 
+             units="days") / 365.25)
+
+ar_data$oldest_visit_age <-
+  as.numeric(
+    difftime(ar_data$oldest_visit_date, 
+             ar_data$dob_to_use, 
+             units="days") / 365.25)
+```
+
+
+```{r}
+#we want the previous visit doses to know the dose that patients walk into clinic on
+  
+ar_data <- ar_data %>%
+  group_by(id) %>%
+  mutate(
+    previous_visit_total_daily_hydrocortisone_equivalent_to_use =
+      lag(total_daily_hydrocortisone_equivalent_at_visit_carried_to_use),
+#we take the previous visit hydrocortisone and divide up by the current bsa to get the dose they walked into clinic on
+      previous_visit_total_daily_hydrocortisone_equivalent_per_current_bsa_to_use = 
+        previous_visit_total_daily_hydrocortisone_equivalent_to_use / body_surface_area_using_interpolations,
+      previous_visit_total_daily_fludro_dose_with_zero_carried_to_use =
+        lag(total_daily_fludro_dose_with_zero_carried_to_use),
+      previous_visit_total_daily_fludro_dose_with_zero_per_current_bsa_to_use = 
+        previous_visit_total_daily_fludro_dose_with_zero_carried_to_use / body_surface_area_using_interpolations,
+         ) %>%
+  ungroup()
+
+
+#check to see what happeneed
+viewer <- 
+  as.data.frame(ar_data[,c(
+    "id",
+    "previous_visit_total_daily_hydrocortisone_equivalent_to_use",
+    "total_daily_hydrocortisone_equivalent_at_visit_carried_to_use",
+    "previous_visit_total_daily_fludro_dose_with_zero_carried_to_use",
+    "previous_visit_total_daily_fludro_dose_with_zero_per_current_bsa_to_use")])
+```
+
+
+
+At this stage I'm just doing some preliminary visualisation of the dose patients are on
+
+```{r}
+write.csv(colnames(ar_data), "column_names.csv", row.names = F)
+```
+
+```{r, find some ids with alot of visits just as an example}
+ids_with_good_range_of_visits <-
+  unique(subset(ar_data, oldest_visit_age>19 & earliest_visit_age<1 )$id)
+```
+
+
+```{r, visualise absolute hydrocortisone equivalent}
+absolute_plot <-
+ggplot(data=ar_data,
+       aes(x=age_to_use, y=previous_visit_total_daily_hydrocortisone_equivalent_to_use)) +
+  geom_point(
+    size=0.2,
+    alpha=0.3
+  ) +
+  geom_line(
+    aes(group=id),
+    alpha=0.3
+  ) +
+  coord_cartesian(
+    ylim=c(0,50)
+  ) +
+  geom_line(
+    data=subset(ar_data, id %in% ids_with_good_range_of_visits),
+    colour="red",
+    aes(group=id)
+  ) +
+  themepowerpointtitle
+dir.create("sandbox_plots")
+  ggsave(filename = 
+           paste0("absolute_plot", 
+                  "_with_examples",
+                  ".png"),
+         path = paste0("sandbox_plots"),
+         plot = absolute_plot,
+         device = "png",
+         width = 10,
+         height = 5,
+         limitsize = FALSE)
+```
+
+
+```{r, visualise total hydrocortisone equivalent per current bsa}
+
+
+id_to_plot <- 7313
+per_bsa_plot <- 
+  ggplot(data=ar_data,
+       aes(x=age_to_use, 
+           y=previous_visit_total_daily_hydrocortisone_equivalent_per_current_bsa_to_use)) +
+  geom_point(
+    size=0.2,
+    alpha=0.3
+  ) +
+  geom_line(
+    aes(group=id),
+    alpha=0.3
+  ) +
+  geom_smooth() +
+  coord_cartesian(
+    ylim = c(0,50)
+  ) +
+  geom_line(
+    data=subset(ar_data, id %in% ids_with_good_range_of_visits),
+    colour="red",
+    aes(group=id)
+  ) +
+  themepowerpointtitle
+dir.create("sandbox_plots")
+  ggsave(filename = 
+           paste0("per_bsa_plot", 
+                  "_with_examples",
+                  ".png"),
+         path = paste0("sandbox_plots"),
+         plot = per_bsa_plot,
+         device = "png",
+         width = 10,
+         height = 5,
+         limitsize = FALSE)
+```
+
+
+
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_33")
+Sys.time()
+```

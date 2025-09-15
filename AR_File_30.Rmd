@@ -1,0 +1,174 @@
+
+
+```{r, load software packages}
+rm(list = ls())
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_21",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+
+load_ar_files_function(previous_file_name = "file_24",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("suffix_of_optimum_weight_model_restrictions"))
+
+load_ar_files_function(previous_file_name = "file_26",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("suffix_of_optimum_height_model_restrictions"))
+
+load_ar_files_function(previous_file_name = "file_28",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("suffix_of_optimum_bmi_model_restrictions"))
+
+```
+
+```{r, recreate the optimum model names using the appropriate suffixs}
+name_of_optimum_height_model_restrictions_male <-
+  paste0("male", suffix_of_optimum_height_model_restrictions)
+name_of_optimum_height_model_restrictions_fema <-
+  paste0("fema", suffix_of_optimum_height_model_restrictions)
+
+
+name_of_optimum_weight_model_restrictions_male <-
+  paste0("male", suffix_of_optimum_weight_model_restrictions)
+name_of_optimum_weight_model_restrictions_fema <-
+  paste0("fema", suffix_of_optimum_weight_model_restrictions)
+
+
+name_of_optimum_bmi_model_restrictions_male <-
+  paste0("male", suffix_of_optimum_bmi_model_restrictions)
+name_of_optimum_bmi_model_restrictions_fema <-
+  paste0("fema", suffix_of_optimum_bmi_model_restrictions)
+
+
+```
+
+load our lists to extract the appropriate optimum models from
+
+```{r}
+
+load(file = paste0("ar_data_files_to_load/list_of_male_random_effects_bmi.Rdata"))
+load(file = paste0("ar_data_files_to_load/list_of_fema_random_effects_bmi.Rdata"))
+
+load(file = paste0("ar_data_files_to_load/list_of_male_random_effects_height.Rdata"))
+load(file = paste0("ar_data_files_to_load/list_of_fema_random_effects_height.Rdata"))
+
+load(file = paste0("ar_data_files_to_load/list_of_male_random_effects_weight.Rdata"))
+load(file = paste0("ar_data_files_to_load/list_of_fema_random_effects_weight.Rdata"))
+
+```
+
+
+```{r, load our optimum model random effects}
+male_random_effects_bmi_metrics <- 
+  as.data.frame(
+    list_of_male_random_effects_bmi[[name_of_optimum_bmi_model_restrictions_male]])
+fema_random_effects_bmi_metrics <- 
+  as.data.frame(
+      list_of_fema_random_effects_bmi[[name_of_optimum_bmi_model_restrictions_fema]])
+
+male_random_effects_weight_metrics <- 
+  as.data.frame(
+      list_of_male_random_effects_weight[[name_of_optimum_weight_model_restrictions_male]])
+fema_random_effects_weight_metrics <- 
+  as.data.frame(
+      list_of_fema_random_effects_weight[[name_of_optimum_weight_model_restrictions_fema]])
+
+male_random_effects_height_metrics <- 
+  as.data.frame(
+      list_of_male_random_effects_height[[name_of_optimum_height_model_restrictions_male]])
+fema_random_effects_height_metrics <- 
+  as.data.frame(
+      list_of_fema_random_effects_height[[name_of_optimum_height_model_restrictions_fema]])
+
+```
+
+
+```{r, create ln_age_to_use and ln_post_conception_age_to_use}
+ar_data$post_conceptual_age <- 
+  ar_data$corrected_gestational_age + 0.75
+
+ar_data$ln_age_to_use <-
+  log(ar_data$age_to_use)
+ar_data$ln_post_conceptual_age <-
+  log(ar_data$post_conceptual_age)
+
+```
+
+```{r, stack our male and female random effects before joining}
+all_random_effects_bmi_metrics <-
+  rbind(male_random_effects_bmi_metrics,
+        fema_random_effects_bmi_metrics)
+print("this number should be zero:")
+nrow(all_random_effects_bmi_metrics) -
+nrow(male_random_effects_bmi_metrics) -
+nrow(fema_random_effects_bmi_metrics)
+
+all_random_effects_height_metrics <-
+  rbind(male_random_effects_height_metrics,
+        fema_random_effects_height_metrics)
+
+all_random_effects_weight_metrics <-
+  rbind(male_random_effects_weight_metrics,
+        fema_random_effects_weight_metrics)
+```
+```{r, join random effects to the main frame}
+ar_data$id <- as.character(ar_data$id)
+ar_data_with_weight_random_effects <-
+  left_join(
+    ar_data, 
+    all_random_effects_weight_metrics,
+    by="id"
+  )
+ar_data_with_height_random_effects <-
+  left_join(
+    ar_data_with_weight_random_effects, 
+    all_random_effects_height_metrics,
+    by="id"
+  )
+ar_data_with_bmi_random_effects <-
+  left_join(
+    ar_data_with_height_random_effects, 
+    all_random_effects_bmi_metrics,
+    by="id"
+  )
+print("The following number should be zero:")
+nrow(ar_data_with_bmi_random_effects) - nrow(ar_data)
+```
+```{r, rationalise data frame name}
+ar_data <- ar_data_with_bmi_random_effects
+```
+
+
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+rm(suffix_of_optimum_height_model_restrictions)
+rm(suffix_of_optimum_weight_model_restrictions)
+rm(suffix_of_optimum_bmi_model_restrictions)
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_30")
+Sys.time()
+```
