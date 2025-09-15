@@ -1,0 +1,1318 @@
+
+
+```{r, load software packages}
+#rm(list = ls())
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+#note in this file we load required lists lower down
+
+load_ar_files_function(previous_file_name = "file_21",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+
+```
+
+
+
+
+```{r, create ln_age_to_use and ln_post_conception_age_to_use}
+ar_data$post_conceptual_age <- 
+  ar_data$corrected_gestational_age + 0.75
+
+ar_data$ln_age_to_use <-
+  log(ar_data$age_to_use)
+ar_data$ln_post_conceptual_age <-
+  log(ar_data$post_conceptual_age)
+```
+
+```{r, extract only those with weight and separate by sex}
+ar_data_both_sexes_with_interpolated_weight <-
+  subset(ar_data, !is.na(interpolated_weight))
+
+ar_data_male_with_interpolated_weight <-
+  subset(ar_data, 
+         !is.na(interpolated_weight) &
+         sex_1_for_M_2_for_F==1)
+
+ar_data_fema_with_interpolated_weight <-
+  subset(ar_data, 
+         !is.na(interpolated_weight) &
+         sex_1_for_M_2_for_F==2)
+
+```
+
+```{r, define our restrictions so that they are the same for each sitar modelling procedure}
+
+minimum_age_to_use_values <- 0.2  # Example range
+min_age <- 0.2
+maximum_age_to_use_values <- 20  # Example range
+max_age <- 20
+degrees_of_freedom_values <- 6  # Example range
+minimum_number_of_visits <- 6
+
+
+#define the variable we do in this file here for purposes of the attrition frame
+this_file_variable <- "interpolated_weight"
+```
+
+the 'study' involves patients that fulfill all of the criteria
+we then want a plot that shows us how many patients fulfill the criteria AND have a reading below and above the age we are at
+
+```{r, create attrtion frame for each combination of minimum and maximum ages and numbers of visits}
+for(each_group in c(
+  "both_sexes",
+  "male",
+  "fema"
+)){
+#default to both sexes
+data_frame_to_assess <- ar_data
+if (each_group=="male"){
+  data_frame_to_assess <- subset(ar_data, sex_1_for_M_2_for_F==1)
+}
+if (each_group=="fema"){
+  data_frame_to_assess <- subset(ar_data, sex_1_for_M_2_for_F==2)
+}
+
+
+for (min_age in minimum_age_to_use_values) {
+for (max_age in maximum_age_to_use_values) {
+for (min_visits in minimum_number_of_visits) {
+  
+    #define the name of the model by its restrictions, and then use this name within our attrition frames
+  name_of_model_restrictions <-
+    paste0(
+      this_file_variable,
+      "_min_visits_", 
+      min_visits, 
+      "_min_age_", 
+      min_age, 
+      "_max_age")
+
+sandwich_attrition_frame <-
+  
+  create_sandwich_attrition_frame(
+    data_frame_to_assess_sandwich_attrition = data_frame_to_assess,
+    min_age = min_age,
+    max_age = max_age,
+    min_visits = min_visits,
+    variable = this_file_variable
+  )
+print(nrow(data_frame_to_assess))
+
+dir.create("attrition_frames_and_plots")
+
+write.csv(
+  sandwich_attrition_frame,
+  paste0("attrition_frames_and_plots/attrition_", each_group, "_", name_of_model_restrictions, ".csv")
+  )
+
+}}}}
+```
+
+```{r, plot attrition of the first permutation within each group}
+#use the attrition frames to create a plot
+for (min_age in minimum_age_to_use_values) {
+for (max_age in maximum_age_to_use_values) {
+for (min_visits in minimum_number_of_visits) {
+  
+    #define the name of the model by its restrictions, and then use this name within our attrition frames
+  name_of_model_restrictions <-
+    paste0(
+      this_file_variable,
+      "_min_visits_", 
+      min_visits, 
+      "_min_age_", 
+      min_age, 
+      "_max_age")
+  
+#reload our attrition frames for each of both_sexes male and female
+
+sandwich_attrition_frame_both_sexes <-
+  read.csv(paste0("attrition_frames_and_plots/attrition_", "both_sexes", "_", name_of_model_restrictions, ".csv"))
+sandwich_attrition_frame_male <-
+  read.csv(paste0("attrition_frames_and_plots/attrition_", "male", "_", name_of_model_restrictions, ".csv"))
+sandwich_attrition_frame_fema <-
+  read.csv(paste0("attrition_frames_and_plots/attrition_", "fema", "_", name_of_model_restrictions, ".csv"))
+
+sandwich_attrition_plot <-
+ggplot(data=sandwich_attrition_frame_both_sexes,
+           aes(x=age, y=percentage_of_patients_from_whole_dataset_in_model_at_this_age)) +
+#  geom_line() +
+  geom_line(data=sandwich_attrition_frame_male, colour="blue") +
+  geom_line(data=sandwich_attrition_frame_fema, colour="red") +
+#can plot overall as well in black, but doesn't necessarily help
+#  geom_hline(yintercept=sandwich_attrition_frame_both_sexes$percentage_of_patients_from_whole_dataset_in_model_overall[1]) +
+  geom_hline(yintercept=sandwich_attrition_frame_male$percentage_of_patients_from_whole_dataset_in_model_overall[1],
+             colour="blue") +
+  geom_hline(yintercept=sandwich_attrition_frame_fema$percentage_of_patients_from_whole_dataset_in_model_overall[1],
+             colour="red") +
+  geom_text(
+    label="Percentage of patients within SITAR model from entire dataset",
+    mapping=aes(
+      x=(max_age - min_age )/2,
+      y=percentage_of_patients_from_whole_dataset_in_model_overall[1]+5)        ) +
+  geom_text(
+    label="Percentage of patients with data above and below each age",
+    mapping=aes(
+      x=(max_age - min_age )/2,
+      y=5)        ) +
+  labs(
+    title=paste0(
+      "Percentage of patients within SITAR model of ", this_file_variable
+      ),
+    subtitle="Blue shows male patient proportions, Red shows female patient proportions",
+    x="Age (years)",
+    y="% Total patients from dataset") +
+  coord_cartesian(ylim=c(0,100)) +
+  themepowerpointtitle
+print(sandwich_attrition_plot)
+
+  ggsave(filename = 
+           paste0("sandwich_attrition_plot_", 
+                  name_of_model_restrictions,
+                  ".png"),
+         path = paste0("attrition_frames_and_plots"),
+         plot = sandwich_attrition_plot,
+         device = "png",
+         width = 6,
+         height = 3,
+         limitsize = FALSE)
+}}}
+```
+
+```{r, delete this just playing to see what output I get for lme4}
+    example <- 
+      lmer(
+        data = ar_data_both_sexes_with_interpolated_weight, 
+        formula = interpolated_weight ~ ln_post_conceptual_age + (ln_post_conceptual_age | id))
+          
+    summary(example)
+ a <-    ranef(example, condVar=F)
+aa <-  ranef(example, condVar=T)
+attr(aa[[1]], "postVar")
+```
+
+
+
+refer to 2025-02-14 for just restricting by number of visits
+when just restricting by visit the minimum needed was about 44 to fit sitar through weight, which is not great at all
+then i realised it was all about restricting to not have the lowest ages as it clearly causes issues with knots are greater data densitiies
+
+
+```{r, load our previous fits to add to}
+#try loading the lists first then you can juts add to them
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_sitar_models_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_overall_fixed_effects_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_random_effects_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_patient_data_with_sitar_predictions_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_individual_patient_random_effects_for_curves_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_fitting_results_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_error_messages_weight.Rdata"))
+```
+
+
+```{r, both_sexes fit the sitar model for weight using different restrictions on age df and number of visits}
+
+
+# Loop through combinations of minimum_age, maximum_age, minimum_visits, and degrees_of_freedom for both_sexes
+for (min_age in minimum_age_to_use_values) {
+for (max_age in maximum_age_to_use_values) {
+for (df in degrees_of_freedom_values) {
+for (min_visits in minimum_number_of_visits) {
+      
+  cat("Trying minimum_age_to_use = ", min_age, 
+      "; maximum_age_to_use = ", max_age, 
+      "; minimum_number_of_visits = ", min_visits, 
+      "; and degrees_of_freedom = ", df, 
+      "in both_sexes", "\n")
+  
+  #define the name of the model by its restrictions, and then use this name within all of our lists
+  name_of_model_restrictions <-
+    paste0(
+      "both_sexes_",
+      "weight_sitar_",
+      "min_visits_", 
+      min_visits, 
+      "_min_age_", 
+      min_age, 
+      "_max_age_", 
+      max_age, 
+      "_df_", 
+      df)
+    
+################    
+  # Subset the data
+  ar_data_both_sexes_restricted <- 
+    subset(
+      ar_data_both_sexes_with_interpolated_weight, 
+      age_to_use >= min_age & 
+      age_to_use <= max_age )
+  
+  #find the total number of visits per patient WITHIN THIS SUBSETTED FRAME
+  ar_data_both_sexes_restricted <- 
+  ar_data_both_sexes_restricted[order(ar_data_both_sexes_restricted$id,
+                ar_data_both_sexes_restricted$visit_date_unix),] 
+
+ar_data_both_sexes_restricted$visit_number <- 
+  ave(ar_data_both_sexes_restricted$visit_date_unix, 
+      ar_data_both_sexes_restricted$id, 
+      FUN = seq_along)
+
+#then we want to add total number of visits for each patient
+ar_data_both_sexes_restricted_latest_visit <- 
+  ar_data_both_sexes_restricted %>% 
+  group_by(id) %>% 
+  slice_max(visit_number, 
+            n=1, 
+            with_ties=F)
+
+ar_data_both_sexes_restricted_latest_visit_to_join <- 
+  ar_data_both_sexes_restricted_latest_visit[,c("id", 
+                          "visit_number")]
+
+ar_data_both_sexes_restricted_latest_visit_to_join$total_visits_in_restricted_data_for_this_patient <- 
+  ar_data_both_sexes_restricted_latest_visit_to_join$visit_number
+
+ar_data_both_sexes_restricted_latest_visit_to_join$visit_number <- NULL
+
+ar_data_both_sexes_restricted_joined <- 
+  dplyr::left_join(ar_data_both_sexes_restricted, ar_data_both_sexes_restricted_latest_visit_to_join, by="id")
+
+ar_data_both_sexes_restricted <- 
+  subset( ar_data_both_sexes_restricted_joined, total_visits_in_restricted_data_for_this_patient >= min_visits )
+
+  
+
+################### 
+      
+  if (nrow(ar_data_both_sexes_restricted) == 0) {
+    cat("Skipping: No data left after filtering.\n")
+    list_of_both_sexes_fitting_results_weight[[]] <- 
+      "No data"
+        next
+      }
+      
+  # Try fitting the SITAR model, handle failures
+  fit_status <- "Failed"
+
+  error_msg <- NULL
+  
+  sitar_model_fit <- NULL
+
+  tryCatch({
+    sitar_model_fit <- 
+      suppressWarnings(sitar(
+        x = ln_post_conceptual_age, 
+        y = interpolated_weight, 
+        id = id, 
+        data = ar_data_both_sexes_restricted, 
+        df = df
+      ))
+
+  # Check if the model fit successfully
+  if (!is.null(sitar_model_fit) && inherits(sitar_model_fit, "sitar")) {
+      fit_status <- "Success"
+    
+  # Store the successfully fitted model
+  list_of_both_sexes_sitar_models_weight[[name_of_model_restrictions]] <- 
+      sitar_model_fit
+
+  # Extract fixed effects
+  #lets use age and then calculate the ln rather than the other way around
+  fixed_effects_fit_data_frame_weight <- 
+    data.frame(age = seq(0.1, 20, by = 0.1))
+  
+#  fixed_effects_fit_data_frame_weight <- 
+#    data.frame(ln_post_conceptual_age = seq(-0.3, 3.05, by = 0.01))
+  #calculate ln_post_conceptual_age
+  fixed_effects_fit_data_frame_weight$ln_post_conceptual_age <-
+    log(fixed_effects_fit_data_frame_weight$age + 0.75)
+  
+  #back calculate age
+#  fixed_effects_fit_data_frame_weight$age <-
+#    exp(fixed_effects_fit_data_frame_weight$ln_post_conceptual_age) - 0.75
+  
+  
+  #predict fixed effects using a level of zero
+  fixed_effects_fit_data_frame_weight$weight <- 
+    as.numeric(predict(sitar_model_fit, newdata = fixed_effects_fit_data_frame_weight, level = 0))
+  # Store fixed effects
+  list_of_both_sexes_overall_fixed_effects_weight[[name_of_model_restrictions]] <- 
+      fixed_effects_fit_data_frame_weight
+
+  # Extract random effects a b and c
+  sitar_model_random_effects <- 
+    rownames_to_column(ranef(sitar_model_fit), var = "id")
+
+  # Store random effects
+  list_of_both_sexes_random_effects_weight[[name_of_model_restrictions]] <- 
+      sitar_model_random_effects
+  
+  #Create stacked frame of each id with random effects predictions to be able to plot smooth curves for random effects of each patient
+  individual_patient_random_effects_for_curves_weight <- data.frame()
+  
+  #loop around each id
+  for (each_id in unique(ar_data_both_sexes_restricted$id)){
+    
+#    single_person_frame <-
+#      data.frame(ln_post_conceptual_age = seq(-0.3, 3.05, by = 0.01))
+    
+  #lets use age and then calculate the ln rather than the other way around
+  single_person_frame <- 
+    data.frame(age = seq(0.1, 20, by = 0.1))
+  
+    #back calculate age
+#    single_person_frame$age <-
+#      exp(single_person_frame$ln_post_conceptual_age) - 0.75
+  single_person_frame$ln_post_conceptual_age <-
+    log(single_person_frame$age + 0.75)
+  
+    single_person_frame$id <- each_id
+    single_person_frame$random_sitar_prediction <-
+      predict(sitar_model_fit, newdata = single_person_frame)
+    
+    #bind the id to the frame outside of the loop
+    individual_patient_random_effects_for_curves_weight <- 
+      rbind(individual_patient_random_effects_for_curves_weight, single_person_frame)
+      
+  }
+  
+  #store the large frame with random effects predictions for curves
+  list_of_both_sexes_individual_patient_random_effects_for_curves_weight[[name_of_model_restrictions]] <- 
+      individual_patient_random_effects_for_curves_weight
+          
+  #create a copy of the data used and just pull out the id_visit_date and id
+  ar_data_both_sexes_restricted_random_effect_predictions <-
+    ar_data_both_sexes_restricted[
+      ,c(
+        "id",
+        "id_visit_date",
+        "ln_post_conceptual_age",
+        "interpolated_height",
+        "interpolated_weight",
+        "bmi_using_interpolations"
+      )
+    ]
+  
+  #back calculate age
+  ar_data_both_sexes_restricted_random_effect_predictions$age <-
+    exp(ar_data_both_sexes_restricted_random_effect_predictions$ln_post_conceptual_age) - 0.75
+  
+  #turn id into a character to allow joining
+  ar_data_both_sexes_restricted_random_effect_predictions$id <-
+    as.character (ar_data_both_sexes_restricted_random_effect_predictions$id)
+  
+  #join the random effects
+  ar_data_both_sexes_restricted_random_effect_predictions <-
+    left_join(
+      ar_data_both_sexes_restricted_random_effect_predictions,
+      sitar_model_random_effects,
+      by="id")
+  
+  #add the sitar individual patient level predictions by patient
+  ar_data_both_sexes_restricted_random_effect_predictions$sitar_prediction_weight <-
+    predict(
+      sitar_model_fit, 
+      newdata = ar_data_both_sexes_restricted_random_effect_predictions, 
+      type = "response")
+  
+  #store the original data and predictions outside of the loop
+  list_of_both_sexes_patient_data_with_sitar_predictions_weight[[name_of_model_restrictions]] <- 
+      ar_data_both_sexes_restricted_random_effect_predictions
+
+  # Plot the fitted model
+    plot(sitar_model_fit)
+  }
+}, error = function(e) {
+   error_msg <<- conditionMessage(e)  # Capture the error message
+})
+
+#store whether the model failed or succeeded  
+list_of_both_sexes_fitting_results_weight[[name_of_model_restrictions]] <- 
+    fit_status
+
+#store the error messages produced in case they're of use      
+if (!is.null(error_msg)) {
+  print(fit_status)
+  print(error_msg)
+  list_of_both_sexes_error_messages_weight[[name_of_model_restrictions]] <- 
+      error_msg
+}
+
+#save the lists each time so we can review them and mess with them on another computer
+save(list_of_both_sexes_sitar_models_weight,   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_sitar_models_weight.Rdata"))
+save(list_of_both_sexes_overall_fixed_effects_weight,   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_overall_fixed_effects_weight.Rdata"))
+save(list_of_both_sexes_random_effects_weight,   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_random_effects_weight.Rdata"))
+save(list_of_both_sexes_patient_data_with_sitar_predictions_weight,   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_patient_data_with_sitar_predictions_weight.Rdata"))
+save(list_of_both_sexes_individual_patient_random_effects_for_curves_weight,   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_individual_patient_random_effects_for_curves_weight.Rdata"))
+save(list_of_both_sexes_fitting_results_weight,   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_fitting_results_weight.Rdata"))
+save(list_of_both_sexes_error_messages_weight,   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_error_messages_weight.Rdata"))
+
+}
+}
+}
+}
+```
+
+
+```{r, load our previous fits to add to}
+#try loading the lists first then you can juts add to them
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_sitar_models_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_overall_fixed_effects_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_random_effects_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_patient_data_with_sitar_predictions_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_individual_patient_random_effects_for_curves_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_fitting_results_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_error_messages_weight.Rdata"))
+```
+
+
+```{r, male fit the sitar model for weight using different restrictions on age df and number of visits}
+
+
+# Loop through combinations of minimum_age, maximum_age, minimum_visits, and degrees_of_freedom for male
+for (min_age in minimum_age_to_use_values) {
+for (max_age in maximum_age_to_use_values) {
+for (df in degrees_of_freedom_values) {
+for (min_visits in minimum_number_of_visits) {
+      
+  cat("Trying minimum_age_to_use = ", min_age, 
+      "; maximum_age_to_use = ", max_age, 
+      "; minimum_number_of_visits = ", min_visits, 
+      "; and degrees_of_freedom = ", df, 
+      "in male", "\n")
+  
+  #define the name of the model by its restrictions, and then use this name within all of our lists
+  name_of_model_restrictions <-
+    paste0(
+      "male_",
+      "weight_sitar_",
+      "min_visits_", 
+      min_visits, 
+      "_min_age_", 
+      min_age, 
+      "_max_age_", 
+      max_age, 
+      "_df_", 
+      df)
+    
+################    
+  # Subset the data
+  ar_data_male_restricted <- 
+    subset(
+      ar_data_male_with_interpolated_weight, 
+      age_to_use >= min_age & 
+      age_to_use <= max_age )
+  
+  #find the total number of visits per patient WITHIN THIS SUBSETTED FRAME
+  ar_data_male_restricted <- 
+  ar_data_male_restricted[order(ar_data_male_restricted$id,
+                ar_data_male_restricted$visit_date_unix),] 
+
+ar_data_male_restricted$visit_number <- 
+  ave(ar_data_male_restricted$visit_date_unix, 
+      ar_data_male_restricted$id, 
+      FUN = seq_along)
+
+#then we want to add total number of visits for each patient
+ar_data_male_restricted_latest_visit <- 
+  ar_data_male_restricted %>% 
+  group_by(id) %>% 
+  slice_max(visit_number, 
+            n=1, 
+            with_ties=F)
+
+ar_data_male_restricted_latest_visit_to_join <- 
+  ar_data_male_restricted_latest_visit[,c("id", 
+                          "visit_number")]
+
+ar_data_male_restricted_latest_visit_to_join$total_visits_in_restricted_data_for_this_patient <- 
+  ar_data_male_restricted_latest_visit_to_join$visit_number
+
+ar_data_male_restricted_latest_visit_to_join$visit_number <- NULL
+
+ar_data_male_restricted_joined <- 
+  dplyr::left_join(ar_data_male_restricted, ar_data_male_restricted_latest_visit_to_join, by="id")
+
+ar_data_male_restricted <- 
+  subset( ar_data_male_restricted_joined, total_visits_in_restricted_data_for_this_patient >= min_visits )
+
+  
+
+###################  
+
+      
+  if (nrow(ar_data_male_restricted) == 0) {
+    cat("Skipping: No data left after filtering.\n")
+    list_of_male_fitting_results_weight[[]] <- 
+      "No data"
+        next
+      }
+      
+  # Try fitting the SITAR model, handle failures
+  fit_status <- "Failed"
+
+  error_msg <- NULL
+  
+  sitar_model_fit <- NULL
+
+  tryCatch({
+    sitar_model_fit <- 
+      suppressWarnings(sitar(
+        x = ln_post_conceptual_age, 
+        y = interpolated_weight, 
+        id = id, 
+        data = ar_data_male_restricted, 
+        df = df
+      ))
+
+  # Check if the model fit successfully
+  if (!is.null(sitar_model_fit) && inherits(sitar_model_fit, "sitar")) {
+      fit_status <- "Success"
+    
+  # Store the successfully fitted model
+  list_of_male_sitar_models_weight[[name_of_model_restrictions]] <- 
+      sitar_model_fit
+
+  #lets use age and then calculate the ln rather than the other way around
+  fixed_effects_fit_data_frame_weight <- 
+    data.frame(age = seq(0.1, 20, by = 0.1))
+  
+#  fixed_effects_fit_data_frame_weight <- 
+#    data.frame(ln_post_conceptual_age = seq(-0.3, 3.05, by = 0.01))
+  #calculate ln_post_conceptual_age
+  fixed_effects_fit_data_frame_weight$ln_post_conceptual_age <-
+    log(fixed_effects_fit_data_frame_weight$age + 0.75)
+  
+  #predict fixed effects using a level of zero
+  fixed_effects_fit_data_frame_weight$weight <- 
+    as.numeric(predict(sitar_model_fit, newdata = fixed_effects_fit_data_frame_weight, level = 0))
+  
+  # Store fixed effects
+  list_of_male_overall_fixed_effects_weight[[name_of_model_restrictions]] <- 
+      fixed_effects_fit_data_frame_weight
+
+  # Extract random effects a b and c
+  sitar_model_random_effects <- 
+    rownames_to_column(ranef(sitar_model_fit), var = "id")
+
+  # Store random effects
+  list_of_male_random_effects_weight[[name_of_model_restrictions]] <- 
+      sitar_model_random_effects
+  
+  #Create stacked frame of each id with random effects predictions to be able to plot smooth curves for random effects of each patient
+  individual_patient_random_effects_for_curves_weight <- data.frame()
+  
+  #loop around each id
+  for (each_id in unique(ar_data_male_restricted$id)){
+    
+  #lets use age and then calculate the ln rather than the other way around
+  single_person_frame <- 
+    data.frame(age = seq(0.1, 20, by = 0.1))
+  
+    #back calculate age
+#    single_person_frame$age <-
+#      exp(single_person_frame$ln_post_conceptual_age) - 0.75
+  single_person_frame$ln_post_conceptual_age <-
+    log(single_person_frame$age + 0.75)
+    single_person_frame$id <- each_id
+    single_person_frame$random_sitar_prediction <-
+      predict(sitar_model_fit, newdata = single_person_frame)
+    
+    #bind the id to the frame outside of the loop
+    individual_patient_random_effects_for_curves_weight <- 
+      rbind(individual_patient_random_effects_for_curves_weight, single_person_frame)
+      
+  }
+  
+  #store the large frame with random effects predictions for curves
+  list_of_male_individual_patient_random_effects_for_curves_weight[[name_of_model_restrictions]] <- 
+      individual_patient_random_effects_for_curves_weight
+          
+  #create a copy of the data used and just pull out the id_visit_date and id
+  ar_data_male_restricted_random_effect_predictions <-
+    ar_data_male_restricted[
+      ,c(
+        "id",
+        "id_visit_date",
+        "ln_post_conceptual_age",
+        "interpolated_height",
+        "interpolated_weight",
+        "bmi_using_interpolations"
+      )
+    ]
+  
+  #back calculate age
+  ar_data_male_restricted_random_effect_predictions$age <-
+    exp(ar_data_male_restricted_random_effect_predictions$ln_post_conceptual_age) - 0.75
+  
+  #turn id into a character to allow joining
+  ar_data_male_restricted_random_effect_predictions$id <-
+    as.character (ar_data_male_restricted_random_effect_predictions$id)
+  
+  #join the random effects
+  ar_data_male_restricted_random_effect_predictions <-
+    left_join(
+      ar_data_male_restricted_random_effect_predictions,
+      sitar_model_random_effects,
+      by="id")
+  
+  #add the sitar individual patient level predictions by patient
+  ar_data_male_restricted_random_effect_predictions$sitar_prediction_weight <-
+    predict(
+      sitar_model_fit, 
+      newdata = ar_data_male_restricted_random_effect_predictions, 
+      type = "response")
+  
+  #store the original data and predictions outside of the loop
+  list_of_male_patient_data_with_sitar_predictions_weight[[name_of_model_restrictions]] <- 
+      ar_data_male_restricted_random_effect_predictions
+
+  # Plot the fitted model
+    plot(sitar_model_fit)
+  }
+}, error = function(e) {
+   error_msg <<- conditionMessage(e)  # Capture the error message
+})
+
+#store whether the model failed or succeeded  
+list_of_male_fitting_results_weight[[name_of_model_restrictions]] <- 
+    fit_status
+
+#store the error messages produced in case they're of use      
+if (!is.null(error_msg)) {
+  print(fit_status)
+  print(error_msg)
+  list_of_male_error_messages_weight[[name_of_model_restrictions]] <- 
+      error_msg
+}
+
+#save the lists each time so we can review them and mess with them on another computer
+save(list_of_male_sitar_models_weight,   
+     file = paste0("ar_data_files_to_load/list_of_male_sitar_models_weight.Rdata"))
+save(list_of_male_overall_fixed_effects_weight,   
+     file = paste0("ar_data_files_to_load/list_of_male_overall_fixed_effects_weight.Rdata"))
+save(list_of_male_random_effects_weight,   
+     file = paste0("ar_data_files_to_load/list_of_male_random_effects_weight.Rdata"))
+save(list_of_male_patient_data_with_sitar_predictions_weight,   
+     file = paste0("ar_data_files_to_load/list_of_male_patient_data_with_sitar_predictions_weight.Rdata"))
+save(list_of_male_individual_patient_random_effects_for_curves_weight,   
+     file = paste0("ar_data_files_to_load/list_of_male_individual_patient_random_effects_for_curves_weight.Rdata"))
+save(list_of_male_fitting_results_weight,   
+     file = paste0("ar_data_files_to_load/list_of_male_fitting_results_weight.Rdata"))
+save(list_of_male_error_messages_weight,   
+     file = paste0("ar_data_files_to_load/list_of_male_error_messages_weight.Rdata"))
+
+}
+}
+}
+}
+```
+
+
+```{r, load our previous fits to add to}
+#try loading the lists first then you can juts add to them
+#load(   
+#     file = paste0("ar_data_files_to_load/list_of_both_sexes_sitar_models_weight.Rdata"))
+#load(   
+#     file = paste0("ar_data_files_to_load/list_of_male_sitar_models_weight.Rdata"))
+
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_sitar_models_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_overall_fixed_effects_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_random_effects_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_patient_data_with_sitar_predictions_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_individual_patient_random_effects_for_curves_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_fitting_results_weight.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_error_messages_weight.Rdata"))
+```
+
+
+
+```{r, fema fit the sitar model for weight using different restrictions on age df and number of visits}
+
+
+# Loop through combinations of minimum_age, maximum_age, minimum_visits, and degrees_of_freedom for fema
+for (min_age in minimum_age_to_use_values) {
+for (max_age in maximum_age_to_use_values) {
+for (df in degrees_of_freedom_values) {
+for (min_visits in minimum_number_of_visits) {
+      
+  cat("Trying minimum_age_to_use = ", min_age, 
+      "; maximum_age_to_use = ", max_age, 
+      "; minimum_number_of_visits = ", min_visits, 
+      "; and degrees_of_freedom = ", df, 
+      "in fema", "\n")
+  
+  #define the name of the model by its restrictions, and then use this name within all of our lists
+  name_of_model_restrictions <-
+    paste0(
+      "fema_",
+      "weight_sitar_",
+      "min_visits_", 
+      min_visits, 
+      "_min_age_", 
+      min_age, 
+      "_max_age_", 
+      max_age, 
+      "_df_", 
+      df)
+    
+################    
+  # Subset the data
+  ar_data_fema_restricted <- 
+    subset(
+      ar_data_fema_with_interpolated_weight, 
+      age_to_use >= min_age & 
+      age_to_use <= max_age )
+  
+  #find the total number of visits per patient WITHIN THIS SUBSETTED FRAME
+  ar_data_fema_restricted <- 
+  ar_data_fema_restricted[order(ar_data_fema_restricted$id,
+                ar_data_fema_restricted$visit_date_unix),] 
+
+ar_data_fema_restricted$visit_number <- 
+  ave(ar_data_fema_restricted$visit_date_unix, 
+      ar_data_fema_restricted$id, 
+      FUN = seq_along)
+
+#then we want to add total number of visits for each patient
+ar_data_fema_restricted_latest_visit <- 
+  ar_data_fema_restricted %>% 
+  group_by(id) %>% 
+  slice_max(visit_number, 
+            n=1, 
+            with_ties=F)
+
+ar_data_fema_restricted_latest_visit_to_join <- 
+  ar_data_fema_restricted_latest_visit[,c("id", 
+                          "visit_number")]
+
+ar_data_fema_restricted_latest_visit_to_join$total_visits_in_restricted_data_for_this_patient <- 
+  ar_data_fema_restricted_latest_visit_to_join$visit_number
+
+ar_data_fema_restricted_latest_visit_to_join$visit_number <- NULL
+
+ar_data_fema_restricted_joined <- 
+  dplyr::left_join(ar_data_fema_restricted, ar_data_fema_restricted_latest_visit_to_join, by="id")
+
+ar_data_fema_restricted <- 
+  subset( ar_data_fema_restricted_joined, total_visits_in_restricted_data_for_this_patient >= min_visits )
+
+  
+
+###################  
+      
+  if (nrow(ar_data_fema_restricted) == 0) {
+    cat("Skipping: No data left after filtering.\n")
+    list_of_fema_fitting_results_weight[[]] <- 
+      "No data"
+        next
+      }
+      
+  # Try fitting the SITAR model, handle failures
+  fit_status <- "Failed"
+
+  error_msg <- NULL
+  
+  sitar_model_fit <- NULL
+
+  tryCatch({
+    sitar_model_fit <- 
+      suppressWarnings(sitar(
+        x = ln_post_conceptual_age, 
+        y = interpolated_weight, 
+        id = id, 
+        data = ar_data_fema_restricted, 
+        df = df
+      ))
+
+  # Check if the model fit successfully
+  if (!is.null(sitar_model_fit) && inherits(sitar_model_fit, "sitar")) {
+      fit_status <- "Success"
+    
+  # Store the successfully fitted model
+  list_of_fema_sitar_models_weight[[name_of_model_restrictions]] <- 
+      sitar_model_fit
+
+  #lets use age and then calculate the ln rather than the other way around
+  fixed_effects_fit_data_frame_weight <- 
+    data.frame(age = seq(0.1, 20, by = 0.1))
+  
+#  fixed_effects_fit_data_frame_weight <- 
+#    data.frame(ln_post_conceptual_age = seq(-0.3, 3.05, by = 0.01))
+  #calculate ln_post_conceptual_age
+  fixed_effects_fit_data_frame_weight$ln_post_conceptual_age <-
+    log(fixed_effects_fit_data_frame_weight$age + 0.75)
+  
+  #predict fixed effects using a level of zero
+  fixed_effects_fit_data_frame_weight$weight <- 
+    as.numeric(predict(sitar_model_fit, newdata = fixed_effects_fit_data_frame_weight, level = 0))
+  
+  # Store fixed effects
+  list_of_fema_overall_fixed_effects_weight[[name_of_model_restrictions]] <- 
+      fixed_effects_fit_data_frame_weight
+
+  # Extract random effects a b and c
+  sitar_model_random_effects <- 
+    rownames_to_column(ranef(sitar_model_fit), var = "id")
+
+  # Store random effects
+  list_of_fema_random_effects_weight[[name_of_model_restrictions]] <- 
+      sitar_model_random_effects
+  
+  #Create stacked frame of each id with random effects predictions to be able to plot smooth curves for random effects of each patient
+  individual_patient_random_effects_for_curves_weight <- data.frame()
+  
+  #loop around each id
+  for (each_id in unique(ar_data_fema_restricted$id)){
+    
+  #lets use age and then calculate the ln rather than the other way around
+  single_person_frame <- 
+    data.frame(age = seq(0.1, 20, by = 0.1))
+  
+    #back calculate age
+#    single_person_frame$age <-
+#      exp(single_person_frame$ln_post_conceptual_age) - 0.75
+  single_person_frame$ln_post_conceptual_age <-
+    log(single_person_frame$age + 0.75)
+    single_person_frame$id <- each_id
+    single_person_frame$random_sitar_prediction <-
+      predict(sitar_model_fit, newdata = single_person_frame)
+    
+    #bind the id to the frame outside of the loop
+    individual_patient_random_effects_for_curves_weight <- 
+      rbind(individual_patient_random_effects_for_curves_weight, single_person_frame)
+      
+  }
+  
+  #store the large frame with random effects predictions for curves
+  list_of_fema_individual_patient_random_effects_for_curves_weight[[name_of_model_restrictions]] <- 
+      individual_patient_random_effects_for_curves_weight
+          
+  #create a copy of the data used and just pull out the id_visit_date and id
+  ar_data_fema_restricted_random_effect_predictions <-
+    ar_data_fema_restricted[
+      ,c(
+        "id",
+        "id_visit_date",
+        "ln_post_conceptual_age",
+        "interpolated_height",
+        "interpolated_weight",
+        "bmi_using_interpolations"
+      )
+    ]
+  
+  #back calculate age
+  ar_data_fema_restricted_random_effect_predictions$age <-
+    exp(ar_data_fema_restricted_random_effect_predictions$ln_post_conceptual_age) - 0.75
+  
+  #turn id into a character to allow joining
+  ar_data_fema_restricted_random_effect_predictions$id <-
+    as.character (ar_data_fema_restricted_random_effect_predictions$id)
+  
+  #join the random effects
+  ar_data_fema_restricted_random_effect_predictions <-
+    left_join(
+      ar_data_fema_restricted_random_effect_predictions,
+      sitar_model_random_effects,
+      by="id")
+  
+  #add the sitar individual patient level predictions by patient
+  ar_data_fema_restricted_random_effect_predictions$sitar_prediction_weight <-
+    predict(
+      sitar_model_fit, 
+      newdata = ar_data_fema_restricted_random_effect_predictions, 
+      type = "response")
+  
+  #store the original data and predictions outside of the loop
+  list_of_fema_patient_data_with_sitar_predictions_weight[[name_of_model_restrictions]] <- 
+      ar_data_fema_restricted_random_effect_predictions
+
+  # Plot the fitted model
+    plot(sitar_model_fit)
+  }
+}, error = function(e) {
+   error_msg <<- conditionMessage(e)  # Capture the error message
+})
+
+#store whether the model failed or succeeded  
+list_of_fema_fitting_results_weight[[name_of_model_restrictions]] <- 
+    fit_status
+
+#store the error messages produced in case they're of use      
+if (!is.null(error_msg)) {
+  print(fit_status)
+  print(error_msg)
+  list_of_fema_error_messages_weight[[name_of_model_restrictions]] <- 
+      error_msg
+}
+
+#save the lists each time so we can review them and mess with them on another computer
+save(list_of_fema_sitar_models_weight,   
+     file = paste0("ar_data_files_to_load/list_of_fema_sitar_models_weight.Rdata"))
+save(list_of_fema_overall_fixed_effects_weight,   
+     file = paste0("ar_data_files_to_load/list_of_fema_overall_fixed_effects_weight.Rdata"))
+save(list_of_fema_random_effects_weight,   
+     file = paste0("ar_data_files_to_load/list_of_fema_random_effects_weight.Rdata"))
+save(list_of_fema_patient_data_with_sitar_predictions_weight,   
+     file = paste0("ar_data_files_to_load/list_of_fema_patient_data_with_sitar_predictions_weight.Rdata"))
+save(list_of_fema_individual_patient_random_effects_for_curves_weight,   
+     file = paste0("ar_data_files_to_load/list_of_fema_individual_patient_random_effects_for_curves_weight.Rdata"))
+save(list_of_fema_fitting_results_weight,   
+     file = paste0("ar_data_files_to_load/list_of_fema_fitting_results_weight.Rdata"))
+save(list_of_fema_error_messages_weight,   
+     file = paste0("ar_data_files_to_load/list_of_fema_error_messages_weight.Rdata"))
+
+}
+}
+}
+}
+```
+
+
+
+
+
+
+
+```{r, plot the weight fixed and random effects fits for each model and calculate fit statistics}
+#create three separate csv files to add results to
+fit_statistics_of_both_sexes_models_weight <- data.frame()
+fit_statistics_of_male_models_weight <- data.frame()
+fit_statistics_of_fema_models_weight <- data.frame()
+
+
+
+#we want to be able to plot both sexes as well as males and females only just from this loop
+for (lists_to_loop_around in c(
+#  "both_sexes", 
+  "male",
+  "fema"
+  )){
+cat(paste0(" \nlooping around ", lists_to_loop_around))
+
+#get the list of combinations within the list we are rendering, defaulting to both sexes
+list_of_combinations <- names(list_of_both_sexes_sitar_models_weight)
+#change that list by sex
+if (grepl(x=lists_to_loop_around, pattern="male")){
+  list_of_combinations <- names(list_of_male_sitar_models_weight)
+}    
+if (grepl(x=lists_to_loop_around, pattern="fema")){
+  list_of_combinations <- names(list_of_fema_sitar_models_weight)
+}    
+
+#now we loop around the list of combinations plotting for each one in the list
+for (name_of_data in list_of_combinations){
+
+#extract what we want to plot from the data
+#use the default as both_sexes, but if it is male or female then we change to those lists  
+underlying_sitar_model <- (list_of_both_sexes_sitar_models_weight[[name_of_data]])
+fixed_effects_to_plot <- (list_of_both_sexes_overall_fixed_effects_weight[[name_of_data]])
+random_effects_to_plot <- (list_of_both_sexes_individual_patient_random_effects_for_curves_weight[[name_of_data]])
+
+if (grepl(x=lists_to_loop_around, pattern="male")){
+  underlying_sitar_model <- (list_of_male_sitar_models_weight[[name_of_data]])
+  fixed_effects_to_plot <- (list_of_male_overall_fixed_effects_weight[[name_of_data]])
+  random_effects_to_plot <- (list_of_male_individual_patient_random_effects_for_curves_weight[[name_of_data]])
+}
+
+if (grepl(x=lists_to_loop_around, pattern="fema")){
+  underlying_sitar_model <- (list_of_fema_sitar_models_weight[[name_of_data]])
+  fixed_effects_to_plot <- (list_of_fema_overall_fixed_effects_weight[[name_of_data]])
+  random_effects_to_plot <- (list_of_fema_individual_patient_random_effects_for_curves_weight[[name_of_data]])
+}
+
+#define our colours as default for both_sexes
+colour_of_fixed_effects <- 
+  "darkgreen"
+colour_of_fixed_effects <- 
+  "black"
+colour_of_random_effects <- 
+  "black"
+point_colour_by_sex <-
+  "black"
+ar_data_points_to_plot_for_weight <-
+  ar_data_both_sexes_with_interpolated_weight
+
+#change our colours for male
+if(grepl(x=name_of_data, pattern="male")){
+  colour_of_fixed_effects <- 
+    "blue"
+  colour_of_random_effects <- 
+    "black"
+  ar_data_points_to_plot_for_weight <-
+    ar_data_male_with_interpolated_weight
+  point_colour_by_sex <-
+    "blue"
+}
+#change our colours for female
+if(grepl(x=name_of_data, pattern="fema")){
+  colour_of_fixed_effects <- 
+    "red"
+  colour_of_random_effects <- 
+    "black"
+  ar_data_points_to_plot_for_weight <-
+    ar_data_fema_with_interpolated_weight
+  point_colour_by_sex <-
+    "coral"
+}
+
+number_of_patients <-
+  length(unique(random_effects_to_plot$id))
+
+plot_fixed_and_random_sitar_effect_fits_weight <-
+  ggplot() +
+#plot the actual data points in the background
+  geom_point(
+    data=subset(ar_data_points_to_plot_for_weight, age_to_use>=min_age & age_to_use<=max_age),
+    aes(
+      x=age_to_use,
+      y=interpolated_weight
+    ),
+    alpha=0.1,
+    colour=point_colour_by_sex
+  ) +
+#plot random effects
+  geom_line(
+    data=random_effects_to_plot,
+    aes(x=age, 
+        y=random_sitar_prediction, 
+        group=id),
+    colour=colour_of_random_effects, 
+    linewidth=0.2, 
+    alpha=0.1) +
+#plot fixed effects
+  geom_line(
+    data=fixed_effects_to_plot,
+    aes(x=age, 
+        y=weight), 
+    linewidth=2, 
+    linetype="longdash",
+    colour=colour_of_fixed_effects,
+    alpha=0.5) +
+  labs(
+    title = name_of_data,
+    subtitle= 
+      paste0("Number of patients = ", number_of_patients),
+    y="Weight (kg)",
+    x="Age (years)") +
+  coord_cartesian(ylim=c(0,80)) +
+  themepowerpointtitle
+
+plot_fixed_and_random_sitar_effect_fits_weight
+
+dir.create(
+  paste0("plot_fixed_and_random_sitar_effect_fits_weight_",
+         lists_to_loop_around), 
+         showWarnings = F)
+# Save the plot as a png file
+  ggsave(filename = 
+           paste0("SITAR_fit_", 
+                  name_of_data,
+                  ".png"),
+         path = paste0("plot_fixed_and_random_sitar_effect_fits_weight_",
+         lists_to_loop_around),
+         plot = plot_fixed_and_random_sitar_effect_fits_weight,
+         device = "png",
+         width = 6,
+         height = 3,
+         limitsize = FALSE)
+# Save the plot as a png file but blank
+  ggsave(filename = 
+           paste0("SITAR_fit_", 
+                  name_of_data,
+                  "_blank.png"),
+         path = paste0("plot_fixed_and_random_sitar_effect_fits_weight_",
+         lists_to_loop_around),
+         plot = plot_fixed_and_random_sitar_effect_fits_weight + 
+           theme(axis.title=element_blank(), 
+                plot.title=element_blank(), 
+                plot.subtitle=element_blank()),
+         device = "png",
+         width = 6,
+         height = 3,
+         limitsize = FALSE)
+  print(paste0("SITAR_fit_", 
+                  name_of_data,
+                  ".png"))
+  
+#then within this loop we also derive all of the fit statistics
+  BIC_of_model <- 
+    BIC(underlying_sitar_model)
+  
+  rmse_of_model <- 
+    calculate_rmse(
+      full_model = underlying_sitar_model
+  )
+
+  pseudo_r2_of_model <- 
+    calculate_pseudo_r2(
+      full_model = underlying_sitar_model
+  )
+
+  fit_statistics_of_model <-
+    data.frame(
+      name_of_model = name_of_data,
+      BIC = BIC_of_model,
+      rmse = rmse_of_model,
+      pseudo_r2 = pseudo_r2_of_model
+    )
+
+#if we are doing both_sexes we add it to the both_sexes csv file  
+if (lists_to_loop_around=="both_sexes"){
+  fit_statistics_of_both_sexes_models_weight <-
+    rbind(fit_statistics_of_both_sexes_models_weight, fit_statistics_of_model)
+  write.csv(
+    fit_statistics_of_both_sexes_models_weight,
+    "fit_statistics_of_both_sexes_models_weight.csv",
+    row.names=F
+  )
+}
+#if we are doing male we add it to the male csv file  
+if (lists_to_loop_around=="male"){
+  fit_statistics_of_male_models_weight <-
+    rbind(fit_statistics_of_male_models_weight, fit_statistics_of_model)
+  write.csv(
+    fit_statistics_of_male_models_weight,
+    "fit_statistics_of_male_models_weight.csv",
+    row.names=F
+  )
+}
+#if we are doing fema we add it to the fema csv file  
+if (lists_to_loop_around=="fema"){
+  fit_statistics_of_fema_models_weight <-
+    rbind(fit_statistics_of_fema_models_weight, fit_statistics_of_model)
+  write.csv(
+    fit_statistics_of_fema_models_weight,
+    "fit_statistics_of_fema_models_weight.csv",
+    row.names=F
+  )
+}
+  
+#end the loop rendering all the different combinations within the lists
+}
+#end the loop rendering all the different sexes
+}
+```
+
+
+```{r, manually calculate fit statistics of interest, for some reason there was a bug in the visualisation above so ive redone here to also have nagelkerke as well as mcfadden}
+all_male_fit_statistics_weight <- data.frame()
+
+for (each_model in names(list_of_male_sitar_models_weight)){
+
+model <- list_of_male_sitar_models_weight[[each_model]]
+
+fit_statistics <-
+  data.frame(
+    model = each_model,
+    bic = BIC(model),
+    rmse = calculate_rmse(model),
+    mcfadden = calculate_pseudo_r2(model),
+    nagelkerke = calculate_r2_nagelkerke(model)
+  )
+
+all_male_fit_statistics_weight <- rbind(all_male_fit_statistics_weight, fit_statistics)
+write.csv(all_male_fit_statistics_weight, "all_male_fit_statistics_weight.csv", row.names=F)
+
+}
+
+all_fema_fit_statistics_weight <- data.frame()
+
+for (each_model in names(list_of_fema_sitar_models_weight)){
+
+model <- list_of_fema_sitar_models_weight[[each_model]]
+
+fit_statistics <-
+  data.frame(
+    model = each_model,
+    bic = BIC(model),
+    rmse = calculate_rmse(model),
+    mcfadden = calculate_pseudo_r2(model),
+    nagelkerke = calculate_r2_nagelkerke(model)
+  )
+
+all_fema_fit_statistics_weight <- rbind(all_fema_fit_statistics_weight, fit_statistics)
+write.csv(all_fema_fit_statistics_weight, "all_fema_fit_statistics_weight.csv", row.names=F)
+
+}
+
+all_both_sexes_fit_statistics_weight <- data.frame()
+
+for (each_model in names(list_of_both_sexes_sitar_models_weight)){
+
+model <- list_of_both_sexes_sitar_models_weight[[each_model]]
+
+fit_statistics <-
+  data.frame(
+    model = each_model,
+    bic = BIC(model),
+    rmse = calculate_rmse(model),
+    mcfadden = calculate_pseudo_r2(model),
+    nagelkerke = calculate_r2_nagelkerke(model)
+  )
+
+all_both_sexes_fit_statistics_weight <- rbind(all_both_sexes_fit_statistics_weight, fit_statistics)
+write.csv(all_both_sexes_fit_statistics_weight, "all_both_sexes_fit_statistics_weight.csv", row.names=F)
+}
+
+```
+
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+rm(ar_data)
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_23")
+Sys.time()
+```

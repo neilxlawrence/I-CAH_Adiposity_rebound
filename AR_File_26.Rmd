@@ -1,0 +1,2115 @@
+
+```{r, load software packages}
+rm(list = ls())
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_21",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+
+```
+
+
+```{r, define our optimum restrictions manually and extract all of our frames relating to the model with those restrictions for each of both_sexes male and fema}
+suffix_of_optimum_height_model_restrictions <- 
+  "_height_sitar_min_visits_6_min_age_0.2_max_age_20_df_5"
+#then create each one through pasting
+name_of_optimum_height_model_restrictions_male <-
+  paste0("male", suffix_of_optimum_height_model_restrictions)
+name_of_optimum_height_model_restrictions_fema <-
+  paste0("fema", suffix_of_optimum_height_model_restrictions)
+name_of_optimum_height_model_restrictions_both_sexes <-
+  paste0("both_sexes", suffix_of_optimum_height_model_restrictions)
+
+```
+
+```{r}
+#to calculate the who zscores for both sexes we need to add a column that has the data on all patients sex
+#take sex from the main frame
+ar_data_id_sex <-
+  unique(
+  ar_data[,c(
+    "id",
+    "sex_1_for_M_2_for_F"
+  )]
+  )
+ar_data_id_sex$id <- as.character(ar_data_id_sex$id)
+ar_data_id_sex$sex_1_for_M_2_for_F <- as.numeric(ar_data_id_sex$sex_1_for_M_2_for_F)
+```
+
+
+```{r, load our sitar model frames for male}
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_sitar_models_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_overall_fixed_effects_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_random_effects_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_patient_data_with_sitar_predictions_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_individual_patient_random_effects_for_curves_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_fitting_results_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_male_error_messages_height.Rdata"))
+```
+
+
+```{r, extract our optimum fits for male from the lists}
+male_sitar_model <-
+  list_of_male_sitar_models_height[[name_of_optimum_height_model_restrictions_male]]
+male_overall_fixed_effects_height <-
+  list_of_male_overall_fixed_effects_height[[name_of_optimum_height_model_restrictions_male]]
+male_random_effects_height_metrics <-
+  list_of_male_random_effects_height[[name_of_optimum_height_model_restrictions_male]]
+male_patient_data_with_sitar_predictions_height <-
+  list_of_male_patient_data_with_sitar_predictions_height[[name_of_optimum_height_model_restrictions_male]]
+male_individual_patient_random_effects_for_curves_height <-
+  list_of_male_individual_patient_random_effects_for_curves_height[[name_of_optimum_height_model_restrictions_male]]
+male_fitting_results_height <-
+  list_of_male_fitting_results_height[[name_of_optimum_height_model_restrictions_male]]
+male_error_messages_height <-
+  list_of_male_error_messages_height[[name_of_optimum_height_model_restrictions_male]]
+
+```
+
+
+```{r, extract the spline basis for male and formulate table for sitar model estimates}
+# Get the predvars attribute
+predvars <- attr(male_sitar_model$ns$terms, "predvars")
+
+# Extract knots and boundary knots
+# Extract from the call directly
+spline_call <- attr(male_sitar_model$ns$terms, "predvars")[[3]]
+
+# Evaluate components
+internal_knots_male <- eval(spline_call$knots)
+boundary_knots_male <- eval(spline_call$Boundary.knots)
+
+library(splines)
+
+# x-values used in the model
+x <- seq(0, 20 ,by=0.1)
+
+# Rebuild the spline basis matrix exactly as used in the model
+spline_basis_male <- ns(
+  x,
+  knots = internal_knots_male,
+  Boundary.knots = boundary_knots_male,
+  intercept = FALSE
+)
+
+
+df_plot <- data.frame(
+  x = x,
+  spline_basis_male
+) %>%
+  pivot_longer(-x, names_to = "basis", values_to = "value")
+
+ggplot(df_plot, aes(x = x, y = value, color = basis)) +
+  geom_line() +
+  labs(title = "Spline Basis Functions from sitar Model") +
+  theme_minimal()
+
+
+dir.create("SITAR_model_parameters")
+sitar_coefficients_male <- 
+  summary(male_sitar_model)$tTable
+#coef(male_sitar_model) gives you all the random effects and takes ages!
+
+#extract standard deviation of random effects
+std_dev_random_effects <- 
+  (VarCorr(male_sitar_model)[, "StdDev"])
+
+fixed_effects_male <-
+  fixed.effects(male_sitar_model)
+
+
+decimal_places <- 3
+
+sitar_model_parameters_height_male <-
+data.frame(
+
+  sitar_internal_knots = paste0(
+    round(internal_knots_male[[1]], digits=decimal_places),
+    ",\n",
+    round(internal_knots_male[[2]], digits=decimal_places),
+    ",\n",
+    round(internal_knots_male[[3]], digits=decimal_places),
+    ",\n",
+    round(internal_knots_male[[4]], digits=decimal_places)),
+    
+  sitar_boundary_knots = paste0(
+    round(boundary_knots_male[[1]], digits=decimal_places),
+    ",\n",
+    round(boundary_knots_male[[2]], digits=decimal_places)),
+  
+  sitar_fixed_s1 = 
+    round(fixed_effects_male[["s1"]], digits=decimal_places),
+  
+  sitar_fixed_s2 = 
+    round(fixed_effects_male[["s2"]], digits=decimal_places),
+  
+  sitar_fixed_s3 = 
+    round(fixed_effects_male[["s3"]], digits=decimal_places),
+  
+  sitar_fixed_s4 = 
+    round(fixed_effects_male[["s4"]], digits=decimal_places),
+  
+  sitar_fixed_s5 = 
+    round(fixed_effects_male[["s5"]], digits=decimal_places),
+  
+  sitar_fixed_s6 = 
+    round(NA, digits=decimal_places),
+  
+  sitar_fixed_a = 
+    round(fixed_effects_male[["a"]], digits=decimal_places),
+
+  sitar_fixed_b = 
+    round(fixed_effects_male[["b"]], digits=decimal_places),
+
+  sitar_fixed_c = 
+    round(fixed_effects_male[["c"]], digits=decimal_places),
+    
+  sitar_random_a_se = 
+    round(as.numeric(std_dev_random_effects[["a"]]), digits=decimal_places),
+    
+  sitar_random_b_se = 
+    round(as.numeric(std_dev_random_effects[["b"]]), digits=decimal_places),
+    
+  sitar_random_c_se = 
+    round(as.numeric(std_dev_random_effects[["c"]]), digits=decimal_places)
+)
+
+sitar_model_parameters_height_male_t <- 
+  rownames_to_column(as.data.frame(t(sitar_model_parameters_height_male)))
+write.csv(
+  sitar_model_parameters_height_male_t,
+  "SITAR_model_parameters/sitar_model_parameters_height_male.csv")
+
+ft <- flextable(sitar_model_parameters_height_male_t)
+  
+  # Customize the table appearance
+  ft <- ft %>%
+    theme_vanilla() %>%
+    align(align = "center", part = "header") %>%
+    align(align = "center", part = "body") %>%  
+    autofit()
+  
+  # Define paragraph formatting with centered alignment
+  centered_paragraph <- fp_par(text.align = "center")
+  
+  doc <- read_docx() %>%
+    body_add_flextable(ft) 
+  
+  print(
+    doc, 
+    target = file.path(paste0("SITAR_model_parameters/sitar_model_parameters_height_male_t", ".docx")))
+
+```
+
+
+
+
+
+```{r}
+nrow(male_sitar_model$data)
+```
+
+
+```{r}
+#first we start by only extracting the id a b and c from the random effects frame. This way if we run this file multiple times, we don't get stacking of extra columns adding each thing again and again
+male_random_effects_height_metrics <-
+  male_random_effects_height_metrics[,1:4]
+
+if (is.null(male_random_effects_height_metrics$a_)){
+#rename the random effects to height
+male_random_effects_height_metrics <-
+dplyr::rename(
+  male_random_effects_height_metrics, 
+    c("a_height"="a", 
+      "b_height"="b",
+      "c_height"="c"))
+}
+```
+
+
+```{r, use our random effects curve frames to calculate salient metrics of growth for interpretation on the absolute scale for male}
+
+#join in the sex to the random effects frame
+male_individual_patient_random_effects_for_curves_height$id <-
+  as.character(male_individual_patient_random_effects_for_curves_height$id)
+male_individual_patient_random_effects_for_curves_height <-
+  left_join(
+    male_individual_patient_random_effects_for_curves_height,
+    ar_data_id_sex,
+    by="id"
+  )
+
+
+
+
+#add the height velocity to the next reading
+male_individual_patient_random_effects_for_curves_height <- 
+  male_individual_patient_random_effects_for_curves_height %>%
+    arrange(id, age) %>%
+        mutate(
+          years_to_next_reading = 
+            lead(age) - age,
+          height_increase_to_next_reading = 
+            lead(random_sitar_prediction) - random_sitar_prediction,
+          height_velocity_to_next_reading = 
+            height_increase_to_next_reading / years_to_next_reading,
+          height_acceleration_to_next_reading = 
+            (lead(height_velocity_to_next_reading) - height_velocity_to_next_reading) / years_to_next_reading,
+          lead_id =
+            lead(id)
+          )
+
+#correct to NA if the lead_id is different for years_to_next_reading
+male_individual_patient_random_effects_for_curves_height$years_to_next_reading <-
+  ifelse(male_individual_patient_random_effects_for_curves_height$lead_id!=
+           male_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         male_individual_patient_random_effects_for_curves_height$years_to_next_reading)
+
+#correct to NA if the lead_id is different for height_increase_to_next_reading
+male_individual_patient_random_effects_for_curves_height$height_increase_to_next_reading <-
+  ifelse(male_individual_patient_random_effects_for_curves_height$lead_id!=
+           male_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         male_individual_patient_random_effects_for_curves_height$height_increase_to_next_reading)
+
+#correct to NA if the lead_id is different for height_velocity_to_next_reading
+male_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading <-
+  ifelse(male_individual_patient_random_effects_for_curves_height$lead_id!=
+           male_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         male_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading)
+
+#we also need to correct to NA if the lead height velocity to next reading is NA, otherwise the next patient reading will be incorrectly estimated
+male_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading <-
+  ifelse(
+    is.na(lead(male_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading)),
+          NA,
+          male_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading)
+  
+
+#then I find where acceleration to next reading is negative, and the previous acceleration to next reading is positive which is a local maximum
+male_individual_patient_random_effects_for_curves_height$local_height_maximum_of_acceleration <-
+  ifelse(male_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading<=0 &
+           lag(male_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading)>=0,
+         1,
+         0)
+
+#correct to NA if the lead_id is different for local_height_maximum_of_acceleration
+male_individual_patient_random_effects_for_curves_height$local_height_maximum_of_acceleration <-
+  ifelse(male_individual_patient_random_effects_for_curves_height$lead_id!=
+           male_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         male_individual_patient_random_effects_for_curves_height$local_height_maximum_of_acceleration)
+
+#correct to NA if the lead_id is different for height_acceleration_to_next_reading
+male_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading <-
+  ifelse(male_individual_patient_random_effects_for_curves_height$lead_id!=
+           male_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         male_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading)
+
+#calculate the salient metrics for this patient
+#take out the row of data with the latest local_height_maximum_of_acceleration
+male_individual_patient_random_effects_latest_peak_height_velocity <-
+  male_individual_patient_random_effects_for_curves_height %>%
+  filter(local_height_maximum_of_acceleration==1) %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties=F, order_by=age) %>%
+  ungroup() 
+
+#then rename the salient columns so we have the age, height and height velocity at the growth spurt
+names(male_individual_patient_random_effects_latest_peak_height_velocity)[
+  names(male_individual_patient_random_effects_latest_peak_height_velocity)=="random_sitar_prediction"] <- 
+  "height_at_latest_peak_height_velocity"
+
+names(male_individual_patient_random_effects_latest_peak_height_velocity)[
+  names(male_individual_patient_random_effects_latest_peak_height_velocity)=="height_velocity_to_next_reading"] <- 
+  "height_velocity_at_latest_peak_height_velocity"
+
+names(male_individual_patient_random_effects_latest_peak_height_velocity)[
+  names(male_individual_patient_random_effects_latest_peak_height_velocity)=="age"] <- 
+  "age_at_latest_peak_height_velocity"
+
+#then just extract those two columns that we want
+male_individual_patient_random_effects_latest_peak_height_velocity <-
+  male_individual_patient_random_effects_latest_peak_height_velocity[,c(
+    "id",
+    "height_velocity_at_latest_peak_height_velocity",
+    "height_at_latest_peak_height_velocity",
+    "age_at_latest_peak_height_velocity"
+  )]
+
+
+#take out just data after 6 years of age
+male_individual_patient_random_effects_over_six_years <-
+  subset(
+    male_individual_patient_random_effects_for_curves_height,
+    age >= 6)
+
+#take out just data after 5 years of age
+male_individual_patient_random_effects_over_five_years <-
+  subset(
+    male_individual_patient_random_effects_for_curves_height,
+    age >= 5)
+      
+#take out just data after 4 years of age
+male_individual_patient_random_effects_over_four_years <-
+  subset(
+    male_individual_patient_random_effects_for_curves_height,
+    age >= 4)
+      
+#take out the whole row for each patient with maximum height velocity after 6
+male_individual_patient_random_effects_fastest_over_six_years <-
+  male_individual_patient_random_effects_over_six_years %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties = F, height_velocity_to_next_reading)
+
+#then rename the random_sitar_prediction as max_height_velocity_at_pubertal_spurt_after_six
+names(male_individual_patient_random_effects_fastest_over_six_years)[
+  names(male_individual_patient_random_effects_fastest_over_six_years)=="height_velocity_to_next_reading"] <- 
+  "max_height_velocity_at_pubertal_spurt_after_six"
+
+#and rename the age as age_at_max_height_velocity_at_pubertal_spurt_after_six
+names(male_individual_patient_random_effects_fastest_over_six_years)[
+  names(male_individual_patient_random_effects_fastest_over_six_years)=="age"] <- 
+  "age_at_max_height_velocity_at_pubertal_spurt_after_six"
+
+#then just extract those two columns that we want
+male_individual_patient_random_effects_fastest_over_six_years <-
+  male_individual_patient_random_effects_fastest_over_six_years[,c(
+    "id",
+    "max_height_velocity_at_pubertal_spurt_after_six",
+    "age_at_max_height_velocity_at_pubertal_spurt_after_six"
+  )]
+      
+
+
+#take out the whole row for each patient with maximum height velocity after 5
+male_individual_patient_random_effects_fastest_over_five_years <-
+  male_individual_patient_random_effects_over_five_years %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties = F, height_velocity_to_next_reading)
+#then rename the random_sitar_prediction as max_height_velocity_at_pubertal_spurt_after_six
+names(male_individual_patient_random_effects_fastest_over_five_years)[
+  names(male_individual_patient_random_effects_fastest_over_five_years)=="height_velocity_to_next_reading"] <- 
+  "max_height_velocity_at_pubertal_spurt_after_five"
+#and rename the age as age_at_max_height_velocity_at_pubertal_spurt_after_six
+names(male_individual_patient_random_effects_fastest_over_five_years)[
+  names(male_individual_patient_random_effects_fastest_over_five_years)=="age"] <- 
+  "age_at_max_height_velocity_at_pubertal_spurt_after_five"
+#then just extract those two columns that we want
+male_individual_patient_random_effects_fastest_over_five_years <-
+  male_individual_patient_random_effects_fastest_over_five_years[,c(
+    "id",
+    "max_height_velocity_at_pubertal_spurt_after_five",
+    "age_at_max_height_velocity_at_pubertal_spurt_after_five"
+  )]
+
+      
+#take out the whole row for each patient with maximum height velocity after 4
+male_individual_patient_random_effects_fastest_over_four_years <-
+  male_individual_patient_random_effects_over_four_years %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties = F, height_velocity_to_next_reading)
+#then rename the random_sitar_prediction as max_height_velocity_at_pubertal_spurt_after_six
+names(male_individual_patient_random_effects_fastest_over_four_years)[
+  names(male_individual_patient_random_effects_fastest_over_four_years)=="height_velocity_to_next_reading"] <- 
+  "max_height_velocity_at_pubertal_spurt_after_four"
+#and rename the age as age_at_max_height_velocity_at_pubertal_spurt_after_six
+names(male_individual_patient_random_effects_fastest_over_four_years)[
+  names(male_individual_patient_random_effects_fastest_over_four_years)=="age"] <- 
+  "age_at_max_height_velocity_at_pubertal_spurt_after_four"
+#then just extract those two columns that we want
+male_individual_patient_random_effects_fastest_over_four_years <-
+  male_individual_patient_random_effects_fastest_over_four_years[,c(
+    "id",
+    "max_height_velocity_at_pubertal_spurt_after_four",
+    "age_at_max_height_velocity_at_pubertal_spurt_after_four"
+  )]
+
+#loop around a load of individual ages we want to extract 
+for (age_to_extract in c(seq(0.5,20, by=0.5))){
+
+    #extract the height at that age
+male_individual_patient_random_effects_at_specific_age <-
+  subset(male_individual_patient_random_effects_for_curves_height,
+         dplyr::near(age, age_to_extract, tol = 1e-6))[,c(
+           "id",
+           "age",
+           "sex_1_for_M_2_for_F",
+           "random_sitar_prediction"
+         )]
+
+#insert a rescue clause here for random effects that are out of range before we calculate the z score turning any ridiculous height into NA
+male_individual_patient_random_effects_at_specific_age$random_sitar_prediction <-
+  ifelse(male_individual_patient_random_effects_at_specific_age$random_sitar_prediction < 1 |
+           male_individual_patient_random_effects_at_specific_age$random_sitar_prediction > 300,
+         NA,
+         male_individual_patient_random_effects_at_specific_age$random_sitar_prediction)
+
+#give us an indicator variable also telling us these heights are spurious
+male_individual_patient_random_effects_at_specific_age$spurious_sitar_height <-
+  ifelse(
+    is.na(male_individual_patient_random_effects_at_specific_age$random_sitar_prediction)  ,
+    1,
+    0
+  )
+#calculate the who z score at this height
+#if the age is 5 or older we use this:
+if (age_to_extract>=5){
+male_individual_patient_random_effects_at_specific_age$who_z_sitar_height_at_specific_age <-
+  anthroplus::anthroplus_zscores(
+   sex =                
+     male_individual_patient_random_effects_at_specific_age$sex_1_for_M_2_for_F,
+   age_in_months =      
+     male_individual_patient_random_effects_at_specific_age$age * 12,
+   height_in_cm =       
+     male_individual_patient_random_effects_at_specific_age$random_sitar_prediction
+)$zhfa
+}
+#if it is less than five the we use the other anthro package
+if (age_to_extract<5){
+male_individual_patient_random_effects_at_specific_age$who_z_sitar_height_at_specific_age <-
+  anthro::anthro_zscores(
+   sex =                male_individual_patient_random_effects_at_specific_age$sex_1_for_M_2_for_F,
+   age =      male_individual_patient_random_effects_at_specific_age$age * 12,
+   lenhei =             as.numeric(male_individual_patient_random_effects_at_specific_age$random_sitar_prediction), 
+   is_age_in_month = T 
+)$zlen
+}
+
+#now we have used the sex column we can get rid of it to stop it duplicating 
+male_individual_patient_random_effects_at_specific_age$sex_1_for_M_2_for_F <- NULL
+
+#rename that column to tell us the age at which the height was spurious
+names(male_individual_patient_random_effects_at_specific_age)[
+  names(male_individual_patient_random_effects_at_specific_age)=="spurious_sitar_height"] <- 
+  paste0("sitar_height_spurious_at_age_", age_to_extract)
+#rename that column to tell us the age at who_z_sitar_height_at_specific_age
+names(male_individual_patient_random_effects_at_specific_age)[
+  names(male_individual_patient_random_effects_at_specific_age)=="who_z_sitar_height_at_specific_age"] <- 
+  paste0("who_z_sitar_height_at_age_", age_to_extract)
+
+#then rename the random_sitar_prediction as sitar_height_at_age whatever it is
+names(male_individual_patient_random_effects_at_specific_age)[
+  names(male_individual_patient_random_effects_at_specific_age)=="random_sitar_prediction"] <- 
+  paste0("sitar_height_at_age_", age_to_extract)
+
+#then rename the age to give us the precise age at whatever it is
+names(male_individual_patient_random_effects_at_specific_age)[
+  names(male_individual_patient_random_effects_at_specific_age)=="age"] <- 
+  paste0("precise_age_at_sitar_height_at_age_", age_to_extract)
+
+
+#join the extracted age in
+male_individual_patient_random_effects_at_specific_age$id <-
+  as.character(male_individual_patient_random_effects_at_specific_age$id)
+male_random_effects_height_metrics <-
+  left_join(
+    male_random_effects_height_metrics, 
+    male_individual_patient_random_effects_at_specific_age,
+    by = join_by(id))
+}
+
+```
+
+```{r, join our other calculated metrics into the overall random effects frame to have them available next to a b and c for male}
+male_individual_patient_random_effects_fastest_over_six_years$id <-
+  as.character(male_individual_patient_random_effects_fastest_over_six_years$id)
+male_random_effects_height_metrics <-
+  left_join(
+    male_random_effects_height_metrics, 
+    male_individual_patient_random_effects_fastest_over_six_years,
+    by = join_by(id))
+
+male_individual_patient_random_effects_fastest_over_five_years$id <-
+  as.character(male_individual_patient_random_effects_fastest_over_five_years$id)
+male_random_effects_height_metrics <-
+  left_join(
+    male_random_effects_height_metrics, 
+    male_individual_patient_random_effects_fastest_over_five_years,
+    by = join_by(id))
+
+male_individual_patient_random_effects_fastest_over_four_years$id <-
+  as.character(male_individual_patient_random_effects_fastest_over_four_years$id)
+male_random_effects_height_metrics <-
+  left_join(
+    male_random_effects_height_metrics, 
+    male_individual_patient_random_effects_fastest_over_four_years,
+    by = join_by(id))
+
+male_individual_patient_random_effects_latest_peak_height_velocity$id <-
+  as.character(male_individual_patient_random_effects_latest_peak_height_velocity$id)
+male_random_effects_height_metrics <-
+  left_join(
+    male_random_effects_height_metrics, 
+    male_individual_patient_random_effects_latest_peak_height_velocity,
+    by = join_by(id))
+
+
+
+```
+
+
+
+```{r, replace the version of our random effects data within our list for male}
+#first remove the sex column so that when we join it back into the main frame in future we don't get a duplication of the sex column 
+male_random_effects_height_metrics$sex_1_for_M_2_for_F <- NULL
+
+list_of_male_random_effects_height[[name_of_optimum_height_model_restrictions_male]] <-
+  as.data.frame(male_random_effects_height_metrics)
+```
+
+```{r, save our list of random effects again for male}
+#we can save this list here again, because when we load it above if we rerun the file, we remove the calculated columns
+save(list_of_male_random_effects_height,   
+     file = paste0("ar_data_files_to_load/list_of_male_random_effects_height.Rdata"))
+```
+
+
+
+
+
+
+
+
+
+```{r, load our sitar model frames for fema}
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_sitar_models_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_overall_fixed_effects_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_random_effects_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_patient_data_with_sitar_predictions_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_individual_patient_random_effects_for_curves_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_fitting_results_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_fema_error_messages_height.Rdata"))
+```
+
+
+```{r, extract our optimum fits for fema from the lists}
+fema_sitar_model <-
+  list_of_fema_sitar_models_height[[name_of_optimum_height_model_restrictions_fema]]
+fema_overall_fixed_effects_height <-
+  list_of_fema_overall_fixed_effects_height[[name_of_optimum_height_model_restrictions_fema]]
+fema_random_effects_height_metrics <-
+  list_of_fema_random_effects_height[[name_of_optimum_height_model_restrictions_fema]]
+fema_patient_data_with_sitar_predictions_height <-
+  list_of_fema_patient_data_with_sitar_predictions_height[[name_of_optimum_height_model_restrictions_fema]]
+fema_individual_patient_random_effects_for_curves_height <-
+  list_of_fema_individual_patient_random_effects_for_curves_height[[name_of_optimum_height_model_restrictions_fema]]
+fema_fitting_results_height <-
+  list_of_fema_fitting_results_height[[name_of_optimum_height_model_restrictions_fema]]
+fema_error_messages_height <-
+  list_of_fema_error_messages_height[[name_of_optimum_height_model_restrictions_fema]]
+
+```
+
+
+```{r, extract the spline basis for fema and formulate table for sitar model estimates}
+# Get the predvars attribute
+predvars <- attr(fema_sitar_model$ns$terms, "predvars")
+
+# Extract knots and boundary knots
+# Extract from the call directly
+spline_call <- attr(fema_sitar_model$ns$terms, "predvars")[[3]]
+
+# Evaluate components
+internal_knots_fema <- eval(spline_call$knots)
+boundary_knots_fema <- eval(spline_call$Boundary.knots)
+
+library(splines)
+
+# x-values used in the model
+x <- seq(0, 20 ,by=0.1)
+
+# Rebuild the spline basis matrix exactly as used in the model
+spline_basis_fema <- ns(
+  x,
+  knots = internal_knots_fema,
+  Boundary.knots = boundary_knots_fema,
+  intercept = FALSE
+)
+
+
+df_plot <- data.frame(
+  x = x,
+  spline_basis_fema
+) %>%
+  pivot_longer(-x, names_to = "basis", values_to = "value")
+
+ggplot(df_plot, aes(x = x, y = value, color = basis)) +
+  geom_line() +
+  labs(title = "Spline Basis Functions from sitar Model") +
+  theme_minimal()
+
+
+dir.create("SITAR_model_parameters")
+sitar_coefficients_fema <- 
+  summary(fema_sitar_model)$tTable
+#coef(fema_sitar_model) gives you all the random effects and takes ages!
+
+#extract standard deviation of random effects
+std_dev_random_effects <- 
+  (VarCorr(fema_sitar_model)[, "StdDev"])
+
+fixed_effects_fema <-
+  fixed.effects(fema_sitar_model)
+
+
+decimal_places <- 3
+
+sitar_model_parameters_height_fema <-
+data.frame(
+
+  sitar_internal_knots = paste0(
+    round(internal_knots_fema[[1]], digits=decimal_places),
+    ",\n",
+    round(internal_knots_fema[[2]], digits=decimal_places),
+    ",\n",
+    round(internal_knots_fema[[3]], digits=decimal_places),
+    ",\n",
+    round(internal_knots_fema[[4]], digits=decimal_places)),
+    
+  sitar_boundary_knots = paste0(
+    round(boundary_knots_fema[[1]], digits=decimal_places),
+    ",\n",
+    round(boundary_knots_fema[[2]], digits=decimal_places)),
+  
+  sitar_fixed_s1 = 
+    round(fixed_effects_fema[["s1"]], digits=decimal_places),
+  
+  sitar_fixed_s2 = 
+    round(fixed_effects_fema[["s2"]], digits=decimal_places),
+  
+  sitar_fixed_s3 = 
+    round(fixed_effects_fema[["s3"]], digits=decimal_places),
+  
+  sitar_fixed_s4 = 
+    round(fixed_effects_fema[["s4"]], digits=decimal_places),
+  
+  sitar_fixed_s5 = 
+    round(fixed_effects_fema[["s5"]], digits=decimal_places),
+  
+  sitar_fixed_s6 = 
+    round(NA, digits=decimal_places),
+  
+  sitar_fixed_a = 
+    round(fixed_effects_fema[["a"]], digits=decimal_places),
+
+  sitar_fixed_b = 
+    round(fixed_effects_fema[["b"]], digits=decimal_places),
+
+  sitar_fixed_c = 
+    round(fixed_effects_fema[["c"]], digits=decimal_places),
+    
+  sitar_random_a_se = 
+    round(as.numeric(std_dev_random_effects[["a"]]), digits=decimal_places),
+    
+  sitar_random_b_se = 
+    round(as.numeric(std_dev_random_effects[["b"]]), digits=decimal_places),
+    
+  sitar_random_c_se = 
+    round(as.numeric(std_dev_random_effects[["c"]]), digits=decimal_places)
+)
+
+sitar_model_parameters_height_fema_t <- 
+  rownames_to_column(as.data.frame(t(sitar_model_parameters_height_fema)))
+write.csv(
+  sitar_model_parameters_height_fema_t,
+  "SITAR_model_parameters/sitar_model_parameters_height_fema.csv")
+
+ft <- flextable(sitar_model_parameters_height_fema_t)
+  
+  # Customize the table appearance
+  ft <- ft %>%
+    theme_vanilla() %>%
+    align(align = "center", part = "header") %>%
+    align(align = "center", part = "body") %>%  
+    autofit()
+  
+  # Define paragraph formatting with centered alignment
+  centered_paragraph <- fp_par(text.align = "center")
+  
+  doc <- read_docx() %>%
+    body_add_flextable(ft) 
+  
+  print(
+    doc, 
+    target = file.path(paste0("SITAR_model_parameters/sitar_model_parameters_height_fema_t", ".docx")))
+
+```
+
+
+
+```{r}
+#first we start by only extracting the id a b and c from the random effects frame. This way if we run this file multiple times, we don't get stacking of extra columns adding each thing again and again
+fema_random_effects_height_metrics <-
+  fema_random_effects_height_metrics[,1:4]
+
+if (is.null(fema_random_effects_height_metrics$a_)){
+#rename the random effects to height
+fema_random_effects_height_metrics <-
+dplyr::rename(
+  fema_random_effects_height_metrics, 
+    c("a_height"="a", 
+      "b_height"="b",
+      "c_height"="c"))
+}
+```
+
+
+```{r, use our random effects curve frames to calculate salient metrics of growth for interpretation on the absolute scale for fema}
+
+#join in the sex to the random effects frame
+fema_individual_patient_random_effects_for_curves_height$id <-
+  as.character(fema_individual_patient_random_effects_for_curves_height$id)
+fema_individual_patient_random_effects_for_curves_height <-
+  left_join(
+    fema_individual_patient_random_effects_for_curves_height,
+    ar_data_id_sex,
+    by="id"
+  )
+
+#add the height velocity to the next reading
+fema_individual_patient_random_effects_for_curves_height <- 
+  fema_individual_patient_random_effects_for_curves_height %>%
+    arrange(id, age) %>%
+        mutate(
+          years_to_next_reading = 
+            lead(age) - age,
+          height_increase_to_next_reading = 
+            lead(random_sitar_prediction) - random_sitar_prediction,
+          height_velocity_to_next_reading = 
+            height_increase_to_next_reading / years_to_next_reading,
+          height_acceleration_to_next_reading = 
+            (lead(height_velocity_to_next_reading) - height_velocity_to_next_reading) / years_to_next_reading,
+          lead_id =
+            lead(id)
+          )
+
+#correct to NA if the lead_id is different for years_to_next_reading
+fema_individual_patient_random_effects_for_curves_height$years_to_next_reading <-
+  ifelse(fema_individual_patient_random_effects_for_curves_height$lead_id!=
+           fema_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         fema_individual_patient_random_effects_for_curves_height$years_to_next_reading)
+#correct to NA if the lead_id is different for height_increase_to_next_reading
+fema_individual_patient_random_effects_for_curves_height$height_increase_to_next_reading <-
+  ifelse(fema_individual_patient_random_effects_for_curves_height$lead_id!=
+           fema_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         fema_individual_patient_random_effects_for_curves_height$height_increase_to_next_reading)
+#correct to NA if the lead_id is different for height_velocity_to_next_reading
+fema_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading <-
+  ifelse(fema_individual_patient_random_effects_for_curves_height$lead_id!=
+           fema_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         fema_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading)
+
+
+#correct to NA if the lead_id is different for height_velocity_to_next_reading
+fema_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading <-
+  ifelse(fema_individual_patient_random_effects_for_curves_height$lead_id!=
+           fema_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         fema_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading)
+
+#then I find where acceleration to next reading is negative, and the previous acceleration to next reading is positive which is a local maximum
+fema_individual_patient_random_effects_for_curves_height$local_height_maximum_of_acceleration <-
+  ifelse(fema_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading<=0 &
+           lag(fema_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading)>=0,
+         1,
+         0)
+
+#correct to NA if the lead_id is different for local_height_maximum_of_acceleration
+fema_individual_patient_random_effects_for_curves_height$local_height_maximum_of_acceleration <-
+  ifelse(fema_individual_patient_random_effects_for_curves_height$lead_id!=
+           fema_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         fema_individual_patient_random_effects_for_curves_height$local_height_maximum_of_acceleration)
+
+#correct to NA if the lead_id is different for height_acceleration_to_next_reading
+fema_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading <-
+  ifelse(fema_individual_patient_random_effects_for_curves_height$lead_id!=
+           fema_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         fema_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading)
+
+
+#we also need to correct to NA if the lead height velocity to next reading is NA, otherwise the next patient reading will be incorrectly estimated
+fema_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading <-
+  ifelse(
+    is.na(lead(fema_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading)),
+          NA,
+          fema_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading)
+
+
+#calculate the salient metrics for this patient
+#take out the row of data with the latest local_height_maximum_of_acceleration
+fema_individual_patient_random_effects_latest_peak_height_velocity <-
+  fema_individual_patient_random_effects_for_curves_height %>%
+  filter(local_height_maximum_of_acceleration==1) %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties=F, order_by=age) %>%
+  ungroup() 
+
+#then rename the fema_individual_patient_random_effects_latest_peak_height_velocity
+names(fema_individual_patient_random_effects_latest_peak_height_velocity)[
+  names(fema_individual_patient_random_effects_latest_peak_height_velocity)=="height_velocity_to_next_reading"] <- 
+  "height_velocity_at_latest_peak_height_velocity"
+
+names(fema_individual_patient_random_effects_latest_peak_height_velocity)[
+  names(fema_individual_patient_random_effects_latest_peak_height_velocity)=="random_sitar_prediction"] <- 
+  "height_at_latest_peak_height_velocity"
+
+names(fema_individual_patient_random_effects_latest_peak_height_velocity)[
+  names(fema_individual_patient_random_effects_latest_peak_height_velocity)=="age"] <- 
+  "age_at_latest_peak_height_velocity"
+
+
+#then just extract those two columns that we want
+fema_individual_patient_random_effects_latest_peak_height_velocity <-
+  fema_individual_patient_random_effects_latest_peak_height_velocity[,c(
+    "id",
+    "height_velocity_at_latest_peak_height_velocity",
+    "height_at_latest_peak_height_velocity",
+    "age_at_latest_peak_height_velocity"
+  )]
+
+      
+#calculate the salient metrics for this patient
+#take out just data after 6 years of age
+fema_individual_patient_random_effects_over_six_years <-
+  subset(
+    fema_individual_patient_random_effects_for_curves_height,
+    age >= 6)
+#take out just data after 5 years of age
+fema_individual_patient_random_effects_over_five_years <-
+  subset(
+    fema_individual_patient_random_effects_for_curves_height,
+    age >= 5)
+#take out just data after 4 years of age
+fema_individual_patient_random_effects_over_four_years <-
+  subset(
+    fema_individual_patient_random_effects_for_curves_height,
+    age >= 4)
+      
+#take out the whole row for each patient with maximum height velocity after 6
+fema_individual_patient_random_effects_fastest_over_six_years <-
+  fema_individual_patient_random_effects_over_six_years %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties = F, height_velocity_to_next_reading)
+#then rename the random_sitar_prediction as max_height_velocity_at_pubertal_spurt_after_six
+names(fema_individual_patient_random_effects_fastest_over_six_years)[
+  names(fema_individual_patient_random_effects_fastest_over_six_years)=="height_velocity_to_next_reading"] <- 
+  "max_height_velocity_at_pubertal_spurt_after_six"
+#and rename the age as age_at_max_height_velocity_at_pubertal_spurt_after_six
+names(fema_individual_patient_random_effects_fastest_over_six_years)[
+  names(fema_individual_patient_random_effects_fastest_over_six_years)=="age"] <- 
+  "age_at_max_height_velocity_at_pubertal_spurt_after_six"
+#then just extract those two columns that we want
+fema_individual_patient_random_effects_fastest_over_six_years <-
+  fema_individual_patient_random_effects_fastest_over_six_years[,c(
+    "id",
+    "max_height_velocity_at_pubertal_spurt_after_six",
+    "age_at_max_height_velocity_at_pubertal_spurt_after_six"
+  )]
+
+#take out the whole row for each patient with maximum height velocity after 5
+fema_individual_patient_random_effects_fastest_over_five_years <-
+  fema_individual_patient_random_effects_over_five_years %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties = F, height_velocity_to_next_reading)
+#then rename the random_sitar_prediction as max_height_velocity_at_pubertal_spurt_after_six
+names(fema_individual_patient_random_effects_fastest_over_five_years)[
+  names(fema_individual_patient_random_effects_fastest_over_five_years)=="height_velocity_to_next_reading"] <- 
+  "max_height_velocity_at_pubertal_spurt_after_five"
+#and rename the age as age_at_max_height_velocity_at_pubertal_spurt_after_six
+names(fema_individual_patient_random_effects_fastest_over_five_years)[
+  names(fema_individual_patient_random_effects_fastest_over_five_years)=="age"] <- 
+  "age_at_max_height_velocity_at_pubertal_spurt_after_five"
+#then just extract those two columns that we want
+fema_individual_patient_random_effects_fastest_over_five_years <-
+  fema_individual_patient_random_effects_fastest_over_five_years[,c(
+    "id",
+    "max_height_velocity_at_pubertal_spurt_after_five",
+    "age_at_max_height_velocity_at_pubertal_spurt_after_five"
+  )]
+
+#take out the whole row for each patient with maximum height velocity after 4
+fema_individual_patient_random_effects_fastest_over_four_years <-
+  fema_individual_patient_random_effects_over_four_years %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties = F, height_velocity_to_next_reading)
+#then rename the random_sitar_prediction as max_height_velocity_at_pubertal_spurt_after_six
+names(fema_individual_patient_random_effects_fastest_over_four_years)[
+  names(fema_individual_patient_random_effects_fastest_over_four_years)=="height_velocity_to_next_reading"] <- 
+  "max_height_velocity_at_pubertal_spurt_after_four"
+#and rename the age as age_at_max_height_velocity_at_pubertal_spurt_after_six
+names(fema_individual_patient_random_effects_fastest_over_four_years)[
+  names(fema_individual_patient_random_effects_fastest_over_four_years)=="age"] <- 
+  "age_at_max_height_velocity_at_pubertal_spurt_after_four"
+#then just extract those two columns that we want
+fema_individual_patient_random_effects_fastest_over_four_years <-
+  fema_individual_patient_random_effects_fastest_over_four_years[,c(
+    "id",
+    "max_height_velocity_at_pubertal_spurt_after_four",
+    "age_at_max_height_velocity_at_pubertal_spurt_after_four"
+  )]
+
+#loop around a load of individual ages we want to extract 
+for (age_to_extract in c(seq(0.5,20, by=0.5))){
+
+    #extract the height at that age
+fema_individual_patient_random_effects_at_specific_age <-
+  subset(fema_individual_patient_random_effects_for_curves_height,
+         dplyr::near(age, age_to_extract, tol = 1e-6))[,c(
+           "id",
+           "age",
+           "sex_1_for_M_2_for_F",
+           "random_sitar_prediction"
+         )]
+
+#insert a rescue clause here for random effects that are out of range before we calculate the z score turning any ridiculous height into NA
+fema_individual_patient_random_effects_at_specific_age$random_sitar_prediction <-
+  ifelse(fema_individual_patient_random_effects_at_specific_age$random_sitar_prediction < 1 |
+           fema_individual_patient_random_effects_at_specific_age$random_sitar_prediction > 300,
+         NA,
+         fema_individual_patient_random_effects_at_specific_age$random_sitar_prediction)
+
+#give us an indicator variable also telling us these heights are spurious
+fema_individual_patient_random_effects_at_specific_age$spurious_sitar_height <-
+  ifelse(
+    is.na(fema_individual_patient_random_effects_at_specific_age$random_sitar_prediction)  ,
+    1,
+    0
+  )
+#calculate the who z score at this height
+#if the age is 5 or older we use this:
+if (age_to_extract>=5){
+fema_individual_patient_random_effects_at_specific_age$who_z_sitar_height_at_specific_age <-
+  anthroplus::anthroplus_zscores(
+   sex =                fema_individual_patient_random_effects_at_specific_age$sex_1_for_M_2_for_F,
+   age_in_months =      fema_individual_patient_random_effects_at_specific_age$age * 12,
+   height_in_cm =             fema_individual_patient_random_effects_at_specific_age$random_sitar_prediction
+)$zhfa
+}
+#if it is less than five the we use the other anthro package
+if (age_to_extract<5){
+fema_individual_patient_random_effects_at_specific_age$who_z_sitar_height_at_specific_age <-
+  anthro::anthro_zscores(
+   sex =                fema_individual_patient_random_effects_at_specific_age$sex_1_for_M_2_for_F,
+   age =      fema_individual_patient_random_effects_at_specific_age$age * 12,
+   lenhei =             as.numeric(fema_individual_patient_random_effects_at_specific_age$random_sitar_prediction), 
+          is_age_in_month = T 
+)$zlen
+}
+
+#now we have used the sex column we can get rid of it to stop it duplicating 
+fema_individual_patient_random_effects_at_specific_age$sex_1_for_M_2_for_F <- NULL
+
+#rename that column to tell us the age at which the height was spurious
+names(fema_individual_patient_random_effects_at_specific_age)[
+  names(fema_individual_patient_random_effects_at_specific_age)=="spurious_sitar_height"] <- 
+  paste0("sitar_height_spurious_at_age_", age_to_extract)
+#rename that column to tell us the age at who_z_sitar_height_at_specific_age
+names(fema_individual_patient_random_effects_at_specific_age)[
+  names(fema_individual_patient_random_effects_at_specific_age)=="who_z_sitar_height_at_specific_age"] <- 
+  paste0("who_z_sitar_height_at_age_", age_to_extract)
+
+#then rename the random_sitar_prediction as sitar_height_at_age whatever it is
+names(fema_individual_patient_random_effects_at_specific_age)[
+  names(fema_individual_patient_random_effects_at_specific_age)=="random_sitar_prediction"] <- 
+  paste0("sitar_height_at_age_", age_to_extract)
+
+#then rename the age to give us the precise age at whatever it is
+names(fema_individual_patient_random_effects_at_specific_age)[
+  names(fema_individual_patient_random_effects_at_specific_age)=="age"] <- 
+  paste0("precise_age_at_sitar_height_at_age_", age_to_extract)
+
+
+#join the extracted age in
+fema_individual_patient_random_effects_at_specific_age$id <-
+  as.character(fema_individual_patient_random_effects_at_specific_age$id)
+fema_random_effects_height_metrics <-
+  left_join(
+    fema_random_effects_height_metrics, 
+    fema_individual_patient_random_effects_at_specific_age,
+    by = join_by(id))
+}
+
+```
+
+```{r, join our other calculated metrics into the overall random effects frame to have them available next to a b and c for fema}
+fema_individual_patient_random_effects_fastest_over_six_years$id <-
+  as.character(fema_individual_patient_random_effects_fastest_over_six_years$id)
+fema_random_effects_height_metrics <-
+  left_join(
+    fema_random_effects_height_metrics, 
+    fema_individual_patient_random_effects_fastest_over_six_years,
+    by = join_by(id))
+
+fema_individual_patient_random_effects_fastest_over_five_years$id <-
+  as.character(fema_individual_patient_random_effects_fastest_over_five_years$id)
+fema_random_effects_height_metrics <-
+  left_join(
+    fema_random_effects_height_metrics, 
+    fema_individual_patient_random_effects_fastest_over_five_years,
+    by = join_by(id))
+
+fema_individual_patient_random_effects_fastest_over_four_years$id <-
+  as.character(fema_individual_patient_random_effects_fastest_over_four_years$id)
+fema_random_effects_height_metrics <-
+  left_join(
+    fema_random_effects_height_metrics, 
+    fema_individual_patient_random_effects_fastest_over_four_years,
+    by = join_by(id))
+
+fema_individual_patient_random_effects_latest_peak_height_velocity$id <-
+  as.character(fema_individual_patient_random_effects_latest_peak_height_velocity$id)
+fema_random_effects_height_metrics <-
+  left_join(
+    fema_random_effects_height_metrics, 
+    fema_individual_patient_random_effects_latest_peak_height_velocity,
+    by = join_by(id))
+
+```
+
+
+
+```{r, replace the version of our random effects data within our list for fema}
+#first remove the sex column so that when we join it back into the main frame in future we don't get a duplication of the sex column 
+fema_random_effects_height_metrics$sex_1_for_M_2_for_F <- NULL
+
+list_of_fema_random_effects_height[[name_of_optimum_height_model_restrictions_fema]] <-
+  as.data.frame(fema_random_effects_height_metrics)
+```
+
+```{r, save our list of random effects again for fema}
+#we can save this list here again, because when we load it above if we rerun the file, we remove the calculated columns
+save(list_of_fema_random_effects_height,   
+     file = paste0("ar_data_files_to_load/list_of_fema_random_effects_height.Rdata"))
+```
+
+
+
+```{r, load our sitar model frames for both_sexes}
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_sitar_models_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_overall_fixed_effects_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_random_effects_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_patient_data_with_sitar_predictions_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_individual_patient_random_effects_for_curves_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_fitting_results_height.Rdata"))
+load(   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_error_messages_height.Rdata"))
+```
+
+
+```{r, extract our optimum fits for both_sexes from the lists}
+both_sexes_sitar_model <-
+  list_of_both_sexes_sitar_models_height[[name_of_optimum_height_model_restrictions_both_sexes]]
+both_sexes_overall_fixed_effects_height <-
+  list_of_both_sexes_overall_fixed_effects_height[[name_of_optimum_height_model_restrictions_both_sexes]]
+both_sexes_random_effects_height_metrics <-
+  list_of_both_sexes_random_effects_height[[name_of_optimum_height_model_restrictions_both_sexes]]
+both_sexes_patient_data_with_sitar_predictions_height <-
+  list_of_both_sexes_patient_data_with_sitar_predictions_height[[name_of_optimum_height_model_restrictions_both_sexes]]
+both_sexes_individual_patient_random_effects_for_curves_height <-
+  list_of_both_sexes_individual_patient_random_effects_for_curves_height[[name_of_optimum_height_model_restrictions_both_sexes]]
+both_sexes_fitting_results_height <-
+  list_of_both_sexes_fitting_results_height[[name_of_optimum_height_model_restrictions_both_sexes]]
+both_sexes_error_messages_height <-
+  list_of_both_sexes_error_messages_height[[name_of_optimum_height_model_restrictions_both_sexes]]
+
+```
+
+```{r}
+#first we start by only extracting the id a b and c from the random effects frame. This way if we run this file multiple times, we don't get stacking of extra columns adding each thing again and again
+both_sexes_random_effects_height_metrics <-
+  both_sexes_random_effects_height_metrics[,1:4]
+
+if (is.null(both_sexes_random_effects_height_metrics$a_)){
+#rename the random effects to height
+both_sexes_random_effects_height_metrics <-
+dplyr::rename(
+  both_sexes_random_effects_height_metrics, 
+    c("a_height"="a", 
+      "b_height"="b",
+      "c_height"="c"))
+}
+```
+
+
+```{r, use our random effects curve frames to calculate salient metrics of growth for interpretation on the absolute scale for both_sexes}
+
+#join in the sex to the random effects frame
+both_sexes_individual_patient_random_effects_for_curves_height$id <-
+  as.character(both_sexes_individual_patient_random_effects_for_curves_height$id)
+both_sexes_individual_patient_random_effects_for_curves_height <-
+  left_join(
+    both_sexes_individual_patient_random_effects_for_curves_height,
+    ar_data_id_sex,
+    by="id"
+  )
+
+#add the height velocity to the next reading
+both_sexes_individual_patient_random_effects_for_curves_height <- 
+  both_sexes_individual_patient_random_effects_for_curves_height %>%
+    arrange(id, age) %>%
+        mutate(
+          years_to_next_reading = 
+            lead(age) - age,
+          height_increase_to_next_reading = 
+            lead(random_sitar_prediction) - random_sitar_prediction,
+          height_velocity_to_next_reading = 
+            height_increase_to_next_reading / years_to_next_reading,
+          height_acceleration_to_next_reading = 
+            (lead(height_velocity_to_next_reading) - height_velocity_to_next_reading) / years_to_next_reading,
+          lead_id =
+            lead(id)
+          )
+
+#correct to NA if the lead_id is different for years_to_next_reading
+both_sexes_individual_patient_random_effects_for_curves_height$years_to_next_reading <-
+  ifelse(both_sexes_individual_patient_random_effects_for_curves_height$lead_id!=
+           both_sexes_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         both_sexes_individual_patient_random_effects_for_curves_height$years_to_next_reading)
+#correct to NA if the lead_id is different for height_increase_to_next_reading
+both_sexes_individual_patient_random_effects_for_curves_height$height_increase_to_next_reading <-
+  ifelse(both_sexes_individual_patient_random_effects_for_curves_height$lead_id!=
+           both_sexes_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         both_sexes_individual_patient_random_effects_for_curves_height$height_increase_to_next_reading)
+#correct to NA if the lead_id is different for height_velocity_to_next_reading
+both_sexes_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading <-
+  ifelse(both_sexes_individual_patient_random_effects_for_curves_height$lead_id!=
+           both_sexes_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         both_sexes_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading)
+      
+
+
+#correct to NA if the lead_id is different for height_velocity_to_next_reading
+both_sexes_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading <-
+  ifelse(both_sexes_individual_patient_random_effects_for_curves_height$lead_id!=
+           both_sexes_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         both_sexes_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading)
+
+#then I find where acceleration to next reading is negative, and the previous acceleration to next reading is positive which is a local maximum
+both_sexes_individual_patient_random_effects_for_curves_height$local_height_maximum_of_acceleration <-
+  ifelse(both_sexes_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading<=0 &
+           lag(both_sexes_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading)>=0,
+         1,
+         0)
+
+#correct to NA if the lead_id is different for local_height_maximum_of_acceleration
+both_sexes_individual_patient_random_effects_for_curves_height$local_height_maximum_of_acceleration <-
+  ifelse(both_sexes_individual_patient_random_effects_for_curves_height$lead_id!=
+           both_sexes_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         both_sexes_individual_patient_random_effects_for_curves_height$local_height_maximum_of_acceleration)
+
+#correct to NA if the lead_id is different for height_acceleration_to_next_reading
+both_sexes_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading <-
+  ifelse(both_sexes_individual_patient_random_effects_for_curves_height$lead_id!=
+           both_sexes_individual_patient_random_effects_for_curves_height$id,
+         NA,
+         both_sexes_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading)
+
+
+
+#we also need to correct to NA if the lead height velocity to next reading is NA, otherwise the next patient reading will be incorrectly estimated
+both_sexes_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading <-
+  ifelse(
+    is.na(lead(both_sexes_individual_patient_random_effects_for_curves_height$height_velocity_to_next_reading)),
+          NA,
+          both_sexes_individual_patient_random_effects_for_curves_height$height_acceleration_to_next_reading)
+
+#calculate the salient metrics for this patient
+#take out the row of data with the latest local_height_maximum_of_acceleration
+both_sexes_individual_patient_random_effects_latest_peak_height_velocity <-
+  both_sexes_individual_patient_random_effects_for_curves_height %>%
+  filter(local_height_maximum_of_acceleration==1) %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties=F, order_by=age) %>%
+  ungroup() 
+
+#then rename the both_sexes_individual_patient_random_effects_latest_peak_height_velocity
+names(both_sexes_individual_patient_random_effects_latest_peak_height_velocity)[
+  names(both_sexes_individual_patient_random_effects_latest_peak_height_velocity)=="height_velocity_to_next_reading"] <- 
+  "height_velocity_at_latest_peak_height_velocity"
+
+names(both_sexes_individual_patient_random_effects_latest_peak_height_velocity)[
+  names(both_sexes_individual_patient_random_effects_latest_peak_height_velocity)=="age"] <- 
+  "age_at_latest_peak_height_velocity"
+
+names(both_sexes_individual_patient_random_effects_latest_peak_height_velocity)[
+  names(both_sexes_individual_patient_random_effects_latest_peak_height_velocity)=="random_sitar_prediction"] <- 
+  "height_at_latest_peak_height_velocity"
+
+
+
+#then just extract those two columns that we want
+both_sexes_individual_patient_random_effects_latest_peak_height_velocity <-
+  both_sexes_individual_patient_random_effects_latest_peak_height_velocity[,c(
+    "id",
+    "height_velocity_at_latest_peak_height_velocity",
+    "height_at_latest_peak_height_velocity",
+    "age_at_latest_peak_height_velocity"
+  )]
+
+#calculate the salient metrics for this patient
+#take out just data after 6 years of age
+both_sexes_individual_patient_random_effects_over_six_years <-
+  subset(
+    both_sexes_individual_patient_random_effects_for_curves_height,
+    age >= 6)
+
+#take out just data after 5 years of age
+both_sexes_individual_patient_random_effects_over_five_years <-
+  subset(
+    both_sexes_individual_patient_random_effects_for_curves_height,
+    age >= 5)
+
+#take out just data after 4 years of age
+both_sexes_individual_patient_random_effects_over_four_years <-
+  subset(
+    both_sexes_individual_patient_random_effects_for_curves_height,
+    age >= 4)
+      
+#take out the whole row for each patient with maximum height velocity after 6
+both_sexes_individual_patient_random_effects_fastest_over_six_years <-
+  both_sexes_individual_patient_random_effects_over_six_years %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties = F, height_velocity_to_next_reading)
+#then rename the random_sitar_prediction as max_height_velocity_at_pubertal_spurt_after_six
+names(both_sexes_individual_patient_random_effects_fastest_over_six_years)[
+  names(both_sexes_individual_patient_random_effects_fastest_over_six_years)=="height_velocity_to_next_reading"] <- 
+  "max_height_velocity_at_pubertal_spurt_after_six"
+#and rename the age as age_at_max_height_velocity_at_pubertal_spurt_after_six
+names(both_sexes_individual_patient_random_effects_fastest_over_six_years)[
+  names(both_sexes_individual_patient_random_effects_fastest_over_six_years)=="age"] <- 
+  "age_at_max_height_velocity_at_pubertal_spurt_after_six"
+#then just extract those two columns that we want
+both_sexes_individual_patient_random_effects_fastest_over_six_years <-
+  both_sexes_individual_patient_random_effects_fastest_over_six_years[,c(
+    "id",
+    "max_height_velocity_at_pubertal_spurt_after_six",
+    "age_at_max_height_velocity_at_pubertal_spurt_after_six"
+  )]
+
+#take out the whole row for each patient with maximum height velocity after 5
+both_sexes_individual_patient_random_effects_fastest_over_five_years <-
+  both_sexes_individual_patient_random_effects_over_five_years %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties = F, height_velocity_to_next_reading)
+#then rename the random_sitar_prediction as max_height_velocity_at_pubertal_spurt_after_six
+names(both_sexes_individual_patient_random_effects_fastest_over_five_years)[
+  names(both_sexes_individual_patient_random_effects_fastest_over_five_years)=="height_velocity_to_next_reading"] <- 
+  "max_height_velocity_at_pubertal_spurt_after_five"
+#and rename the age as age_at_max_height_velocity_at_pubertal_spurt_after_six
+names(both_sexes_individual_patient_random_effects_fastest_over_five_years)[
+  names(both_sexes_individual_patient_random_effects_fastest_over_five_years)=="age"] <- 
+  "age_at_max_height_velocity_at_pubertal_spurt_after_five"
+#then just extract those two columns that we want
+both_sexes_individual_patient_random_effects_fastest_over_five_years <-
+  both_sexes_individual_patient_random_effects_fastest_over_five_years[,c(
+    "id",
+    "max_height_velocity_at_pubertal_spurt_after_five",
+    "age_at_max_height_velocity_at_pubertal_spurt_after_five"
+  )]
+
+#take out the whole row for each patient with maximum height velocity after 4
+both_sexes_individual_patient_random_effects_fastest_over_four_years <-
+  both_sexes_individual_patient_random_effects_over_four_years %>%
+  group_by(id) %>%
+  slice_max(n=1, with_ties = F, height_velocity_to_next_reading)
+#then rename the random_sitar_prediction as max_height_velocity_at_pubertal_spurt_after_six
+names(both_sexes_individual_patient_random_effects_fastest_over_four_years)[
+  names(both_sexes_individual_patient_random_effects_fastest_over_four_years)=="height_velocity_to_next_reading"] <- 
+  "max_height_velocity_at_pubertal_spurt_after_four"
+#and rename the age as age_at_max_height_velocity_at_pubertal_spurt_after_six
+names(both_sexes_individual_patient_random_effects_fastest_over_four_years)[
+  names(both_sexes_individual_patient_random_effects_fastest_over_four_years)=="age"] <- 
+  "age_at_max_height_velocity_at_pubertal_spurt_after_four"
+#then just extract those two columns that we want
+both_sexes_individual_patient_random_effects_fastest_over_four_years <-
+  both_sexes_individual_patient_random_effects_fastest_over_four_years[,c(
+    "id",
+    "max_height_velocity_at_pubertal_spurt_after_four",
+    "age_at_max_height_velocity_at_pubertal_spurt_after_four"
+  )]
+
+#loop around a load of individual ages we want to extract 
+for (age_to_extract in c(seq(0.5,20, by=0.5))){
+
+    #extract the height at that age
+both_sexes_individual_patient_random_effects_at_specific_age <-
+  subset(both_sexes_individual_patient_random_effects_for_curves_height,
+         dplyr::near(age, age_to_extract, tol = 1e-6))[,c(
+           "id",
+           "age",
+           "sex_1_for_M_2_for_F",
+           "random_sitar_prediction"
+         )]
+
+#insert a rescue clause here for random effects that are out of range before we calculate the z score turning any ridiculous height into NA
+both_sexes_individual_patient_random_effects_at_specific_age$random_sitar_prediction <-
+  ifelse(both_sexes_individual_patient_random_effects_at_specific_age$random_sitar_prediction < 1 |
+           both_sexes_individual_patient_random_effects_at_specific_age$random_sitar_prediction > 300,
+         NA,
+         both_sexes_individual_patient_random_effects_at_specific_age$random_sitar_prediction)
+
+#give us an indicator variable also telling us these heights are spurious
+both_sexes_individual_patient_random_effects_at_specific_age$spurious_sitar_height <-
+  ifelse(
+    is.na(both_sexes_individual_patient_random_effects_at_specific_age$random_sitar_prediction)  ,
+    1,
+    0
+  )
+#calculate the who z score at this height
+#if the age is 5 or older we use this:
+if (age_to_extract>=5){
+both_sexes_individual_patient_random_effects_at_specific_age$who_z_sitar_height_at_specific_age <-
+  anthroplus::anthroplus_zscores(
+   sex =                both_sexes_individual_patient_random_effects_at_specific_age$sex_1_for_M_2_for_F,
+   age_in_months =      both_sexes_individual_patient_random_effects_at_specific_age$age * 12,
+   height_in_cm =             both_sexes_individual_patient_random_effects_at_specific_age$random_sitar_prediction
+)$zhfa
+}
+#if it is less than five the we use the other anthro package
+if (age_to_extract<5){
+both_sexes_individual_patient_random_effects_at_specific_age$who_z_sitar_height_at_specific_age <-
+  anthro::anthro_zscores(
+   sex =                both_sexes_individual_patient_random_effects_at_specific_age$sex_1_for_M_2_for_F,
+   age =      both_sexes_individual_patient_random_effects_at_specific_age$age * 12,
+   lenhei =             as.numeric(both_sexes_individual_patient_random_effects_at_specific_age$random_sitar_prediction), 
+          is_age_in_month = T 
+)$zlen
+}
+
+#now we have used the sex column we can get rid of it to stop it duplicating 
+both_sexes_individual_patient_random_effects_at_specific_age$sex_1_for_M_2_for_F <- NULL
+
+#rename that column to tell us the age at which the height was spurious
+names(both_sexes_individual_patient_random_effects_at_specific_age)[
+  names(both_sexes_individual_patient_random_effects_at_specific_age)=="spurious_sitar_height"] <- 
+  paste0("sitar_height_spurious_at_age_", age_to_extract)
+#rename that column to tell us the age at who_z_sitar_height_at_specific_age
+names(both_sexes_individual_patient_random_effects_at_specific_age)[
+  names(both_sexes_individual_patient_random_effects_at_specific_age)=="who_z_sitar_height_at_specific_age"] <- 
+  paste0("who_z_sitar_height_at_age_", age_to_extract)
+
+#then rename the random_sitar_prediction as sitar_height_at_age whatever it is
+names(both_sexes_individual_patient_random_effects_at_specific_age)[
+  names(both_sexes_individual_patient_random_effects_at_specific_age)=="random_sitar_prediction"] <- 
+  paste0("sitar_height_at_age_", age_to_extract)
+
+#then rename the age to give us the precise age at whatever it is
+names(both_sexes_individual_patient_random_effects_at_specific_age)[
+  names(both_sexes_individual_patient_random_effects_at_specific_age)=="age"] <- 
+  paste0("precise_age_at_sitar_height_at_age_", age_to_extract)
+
+
+#join the extracted age in
+both_sexes_individual_patient_random_effects_at_specific_age$id <-
+  as.character(both_sexes_individual_patient_random_effects_at_specific_age$id)
+both_sexes_random_effects_height_metrics <-
+  left_join(
+    both_sexes_random_effects_height_metrics, 
+    both_sexes_individual_patient_random_effects_at_specific_age,
+    by = join_by(id))
+}
+
+```
+
+```{r, join our other calculated metrics into the overall random effects frame to have them available next to a b and c for both_sexes}
+both_sexes_individual_patient_random_effects_fastest_over_six_years$id <-
+  as.character(both_sexes_individual_patient_random_effects_fastest_over_six_years$id)
+both_sexes_random_effects_height_metrics <-
+  left_join(
+    both_sexes_random_effects_height_metrics, 
+    both_sexes_individual_patient_random_effects_fastest_over_six_years,
+    by = join_by(id))
+
+both_sexes_individual_patient_random_effects_fastest_over_five_years$id <-
+  as.character(both_sexes_individual_patient_random_effects_fastest_over_five_years$id)
+both_sexes_random_effects_height_metrics <-
+  left_join(
+    both_sexes_random_effects_height_metrics, 
+    both_sexes_individual_patient_random_effects_fastest_over_five_years,
+    by = join_by(id))
+
+both_sexes_individual_patient_random_effects_fastest_over_four_years$id <-
+  as.character(both_sexes_individual_patient_random_effects_fastest_over_four_years$id)
+both_sexes_random_effects_height_metrics <-
+  left_join(
+    both_sexes_random_effects_height_metrics, 
+    both_sexes_individual_patient_random_effects_fastest_over_four_years,
+    by = join_by(id))
+
+
+
+both_sexes_individual_patient_random_effects_latest_peak_height_velocity$id <-
+  as.character(both_sexes_individual_patient_random_effects_latest_peak_height_velocity$id)
+both_sexes_random_effects_height_metrics <-
+  left_join(
+    both_sexes_random_effects_height_metrics, 
+    both_sexes_individual_patient_random_effects_latest_peak_height_velocity,
+    by = join_by(id))
+
+```
+
+
+
+```{r, replace the version of our random effects data within our list for both_sexes}
+#first remove the sex column so that when we join it back into the main frame in future we don't get a duplication of the sex column 
+both_sexes_random_effects_height_metrics$sex_1_for_M_2_for_F <- NULL
+
+list_of_both_sexes_random_effects_height[[name_of_optimum_height_model_restrictions_both_sexes]] <-
+  as.data.frame(both_sexes_random_effects_height_metrics)
+```
+
+```{r, save our list of random effects again for both_sexes}
+#we can save this list here again, because when we load it above if we rerun the file, we remove the calculated columns
+save(list_of_both_sexes_random_effects_height,   
+     file = paste0("ar_data_files_to_load/list_of_both_sexes_random_effects_height.Rdata"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+************************************
+plot sitar fixed and random effects over raw data for height
+************************************
+
+```{r, plot individual patient sitar fits over patient raw data}
+for (each_group in c(
+  "male",
+  "fema",
+  "both_sexes"
+)){
+  
+
+
+#default to both_sexes
+all_patient_data <-
+  both_sexes_sitar_model$data
+random_effects_curve_data <-
+  both_sexes_individual_patient_random_effects_for_curves_height
+random_effects_data <-
+  both_sexes_random_effects_height_metrics
+fixed_effects_curve_data <-
+  both_sexes_overall_fixed_effects_height
+fixed_effects_colour<-"darkgreen"
+name_of_model <-
+  name_of_optimum_height_model_restrictions_both_sexes
+
+if (each_group=="male"){
+  fixed_effects_colour <- "blue"
+all_patient_data <-
+  male_sitar_model$data
+random_effects_curve_data <-
+  male_individual_patient_random_effects_for_curves_height
+random_effects_data <-
+  male_random_effects_height_metrics
+fixed_effects_curve_data <-
+  male_overall_fixed_effects_height
+name_of_model <-
+  name_of_optimum_height_model_restrictions_male
+}
+if (each_group=="fema"){
+  fixed_effects_colour<-"red"
+all_patient_data <-
+  fema_sitar_model$data
+random_effects_curve_data <-
+  fema_individual_patient_random_effects_for_curves_height
+random_effects_data <-
+  fema_random_effects_height_metrics
+fixed_effects_curve_data <-
+  fema_overall_fixed_effects_height
+name_of_model <-
+  name_of_optimum_height_model_restrictions_fema
+}
+
+
+#then plot it
+all_patient_plot <- 
+  ggplot(data=fixed_effects_curve_data, 
+         aes(x=age, 
+             y=height)) + 
+  geom_point(data=all_patient_data,
+    aes(x=age_to_use,
+        y=interpolated_height), 
+    size=2,
+    alpha=0.2, 
+    colour="black") +
+  geom_line(data=random_effects_curve_data,
+    aes(
+      x=age,
+      y=random_sitar_prediction,
+      group=id), 
+    alpha=0.1, 
+    linewidth=0.5,
+    colour="black") +
+  geom_line(
+    aes(), 
+    linewidth=1.5,
+    linetype="longdash",
+    alpha=0.8, 
+    colour=fixed_effects_colour) +
+  coord_cartesian(ylim=c(50,200)) +
+  labs(title=name_of_model,
+       subtitle="Dashed line = Fixed Effects, Solid line = Patient Random Effects",
+       y= "Height (cm)",
+       x= "Age (years)") +
+  themepowerpointtitle
+all_patient_plot
+dir.create(
+  paste0("all_patient_sitar_plots")
+  )
+dir.create(
+  paste0("all_patient_sitar_plots/", 
+         name_of_model)
+  )
+cat(paste0("printing ", each_group, "\n"))
+ggsave(filename=paste0(each_group, "_all.png"), 
+       path=
+         paste0(
+         "all_patient_sitar_plots/", 
+         name_of_model),
+       plot = all_patient_plot, 
+       device="png",  
+       width=10, height=5, 
+       limitsize=F)
+}
+
+```
+
+
+
+
+
+
+***********************************
+Plot individual ggplots of sitar optimum model fit for each of male fema and both_sexes along with original patient data
+***********************************
+
+this will loop around and plot patients individually, so this will take a while
+
+UNGREY THIS CHUNK FOR INDIVIDUAL PLOTS
+``{r, plot individual patient sitar fits over patient raw data}
+for (each_group in c(
+  "male",
+  "fema",
+  "both_sexes"
+)){
+  
+
+
+#default to both_sexes
+all_patient_data <-
+  both_sexes_sitar_model$data
+random_effects_curve_data <-
+  both_sexes_individual_patient_random_effects_for_curves_height
+random_effects_data <-
+  both_sexes_random_effects_height_metrics
+fixed_effects_curve_data <-
+  both_sexes_overall_fixed_effects_height
+fixed_effects_colour<-"darkgreen"
+name_of_model <-
+  name_of_optimum_height_model_restrictions_both_sexes
+
+if (each_group=="male"){
+  fixed_effects_colour <- "blue"
+all_patient_data <-
+  male_sitar_model$data
+random_effects_curve_data <-
+  male_individual_patient_random_effects_for_curves_height
+random_effects_data <-
+  male_random_effects_height_metrics
+fixed_effects_curve_data <-
+  male_overall_fixed_effects_height
+name_of_model <-
+  name_of_optimum_height_model_restrictions_male
+}
+if (each_group=="fema"){
+  fixed_effects_colour<-"red"
+all_patient_data <-
+  fema_sitar_model$data
+random_effects_curve_data <-
+  fema_individual_patient_random_effects_for_curves_height
+fixed_effects_curve_data <-
+  fema_overall_fixed_effects_height
+random_effects_data <-
+  fema_random_effects_height_metrics
+name_of_model <-
+  name_of_optimum_height_model_restrictions_fema
+}
+
+#then we loop around the patient ids
+for (each_patient in c(
+  unique(all_patient_data$id)
+)){
+  
+#each_patient <- 557 #practice patient
+  #take out the patient data
+  individual_patient_data <-
+    subset(all_patient_data, id==each_patient)
+  individual_random_effects_curve <-
+    subset(random_effects_curve_data, id==each_patient)
+  individual_random_effects_data <-
+    subset(random_effects_data, id==each_patient)
+  
+#then plot it
+individual_patient_plot <- 
+  ggplot(data=fixed_effects_curve_data, 
+         aes(x=age, 
+             y=height)) + 
+  geom_line(
+    aes(), 
+    linewidth=1.5,
+    linetype="longdash",
+    alpha=0.5, 
+    colour=fixed_effects_colour) +
+  geom_point(data=individual_patient_data,
+    aes(x=age_to_use,
+        y=interpolated_height), 
+    size=2,
+    alpha=0.5, 
+    colour="black") +
+  geom_line(data=individual_random_effects_curve,
+    aes(
+      x=age,
+      y=random_sitar_prediction), 
+    alpha=0.5, 
+    linewidth=1.5,
+    colour="black") +
+  #plot a vertical line for the fastest spurt after six
+  geom_vline(xintercept = 
+               individual_random_effects_data[1,"age_at_latest_peak_height_velocity"], 
+             colour="black",
+             linewidth=2) +
+#  geom_vline(xintercept = 
+#               individual_random_effects_data[1,"age_at_max_height_velocity_at_pubertal_spurt_after_six"], 
+#             colour="purple",
+#             linewidth=2) +
+#  geom_vline(xintercept = 
+#               individual_random_effects_data[1,"age_at_max_height_velocity_at_pubertal_spurt_after_five"], 
+#             colour="darkgreen",
+#             linewidth=2) +
+#  geom_vline(xintercept = 
+#               individual_random_effects_data[1,"age_at_max_height_velocity_at_pubertal_spurt_after_four"], 
+#             colour="blue",
+#             linewidth=2) +
+  coord_cartesian(ylim=c(50,200)) +
+  labs(title=name_of_model,
+       subtitle="Dashed line = Fixed Effects, Solid line = Patient Random Effects, purple = 6, green = 5, blue = 4",
+       y= "Height (cm)",
+       x= "Age (years)") +
+  themewithlegend
+
+dir.create(
+  paste0("individual_patient_sitar_plots")
+  )
+dir.create(
+  paste0("individual_patient_sitar_plots/", 
+         name_of_model)
+  )
+cat(paste0("printing ", each_group, " specifically the patient ", each_patient, "\n"))
+print(paste0(Sys.time(), "\n"))
+ggsave(filename=paste0("id_", each_patient, ".png"), 
+       path=
+         paste0(
+         "individual_patient_sitar_plots/", 
+         name_of_model),
+       plot = individual_patient_plot, 
+       device="png",  
+       width=10, height=5, 
+       limitsize=F)
+#redo that plot just after four
+ggsave(filename=paste0("after_five_id_", each_patient, ".png"), 
+       path=
+         paste0(
+         "individual_patient_sitar_plots/", 
+         name_of_model),
+       plot = (individual_patient_plot + coord_cartesian(xlim=c(4,20))), 
+       device="png",  
+       width=10, height=5, 
+       limitsize=F)
+#redo that plot just after five
+ggsave(filename=paste0("after_five_id_", each_patient, ".png"), 
+       path=
+         paste0(
+         "individual_patient_sitar_plots/", 
+         name_of_model),
+       plot = (individual_patient_plot + coord_cartesian(xlim=c(5,20))), 
+       device="png",  
+       width=10, height=5, 
+       limitsize=F)
+#redo that plot just after six
+ggsave(filename=paste0("after_five_id_", each_patient, ".png"), 
+       path=
+         paste0(
+         "individual_patient_sitar_plots/", 
+         name_of_model),
+       plot = (individual_patient_plot + coord_cartesian(xlim=c(6,20))), 
+       device="png",  
+       width=10, height=5, 
+       limitsize=F)
+}
+}
+``
+
+```{r, summarising the pubertal growth spurt}
+#male_random_effects_height_metrics contains all of our a b and c, and separate derived growth metrics
+#if we look at the patients who don't have a growth spurt - i.e. fastest growth spurt at four when restricted to four and fastest growth spurt at six when restricted to six, what do we see about the sitar random effects
+
+ggplot(data=male_random_effects_height_metrics, aes(x=sitar_height_at_age_18, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=male_random_effects_height_metrics, aes(x=a_height, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=male_random_effects_height_metrics, aes(x=b_height, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=male_random_effects_height_metrics, aes(x=c_height, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=male_random_effects_height_metrics, aes(x=a_height, y=b_height)) + geom_point()
+ggplot(data=male_random_effects_height_metrics, aes(x=a_height, y=c_height)) + geom_point()
+ggplot(data=male_random_effects_height_metrics, aes(x=b_height, y=c_height)) + geom_point()
+
+ggplot(data=fema_random_effects_height_metrics, aes(x=sitar_height_at_age_18, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=fema_random_effects_height_metrics, aes(x=a_height, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=fema_random_effects_height_metrics, aes(x=b_height, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=fema_random_effects_height_metrics, aes(x=c_height, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=fema_random_effects_height_metrics, aes(x=a_height, y=b_height)) + geom_point()
+ggplot(data=fema_random_effects_height_metrics, aes(x=a_height, y=c_height)) + geom_point()
+ggplot(data=fema_random_effects_height_metrics, aes(x=b_height, y=c_height)) + geom_point()
+
+ggplot(data=both_sexes_random_effects_height_metrics, aes(x=a_height, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=both_sexes_random_effects_height_metrics, aes(x=b_height, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=both_sexes_random_effects_height_metrics, aes(x=c_height, y=age_at_latest_peak_height_velocity)) + geom_point()
+ggplot(data=both_sexes_random_effects_height_metrics, aes(x=a_height, y=b_height)) + geom_point()
+ggplot(data=both_sexes_random_effects_height_metrics, aes(x=a_height, y=c_height)) + geom_point()
+ggplot(data=both_sexes_random_effects_height_metrics, aes(x=b_height, y=c_height)) + geom_point()
+
+
+#HERE I AM - CHANGE THESE TO THE LATEST SPURT AND CREATE SUMMARY STATISTICS
+
+#here i am - do i say something about height associated with earlier spurt? Surely I do...
+```
+
+```{r}
+four <- subset(male_random_effects_height_metrics, age_at_max_height_velocity_at_pubertal_spurt_after_four==4)
+five <- subset(male_random_effects_height_metrics, age_at_max_height_velocity_at_pubertal_spurt_after_five==5)
+six <- subset(male_random_effects_height_metrics, age_at_max_height_velocity_at_pubertal_spurt_after_six==6)
+
+five$age_at_max_height_velocity_at_pubertal_spurt_after_five
+```
+
+```{r, summary stats of data points and patients for height model}
+sink("summary_of_data_into_sitar_height_models.txt", split=T)
+print("Number of data points used in male SITAR height model")
+nrow(male_sitar_model$data)
+print("Number of patients used in male SITAR height model")
+length(unique(male_sitar_model$data$id))
+
+print("Number of data points used in fema SITAR height model")
+nrow(fema_sitar_model$data)
+print("Number of patients used in fema SITAR height model")
+length(unique(fema_sitar_model$data$id))
+
+print("Number of data points used in both_sexes SITAR height model")
+nrow(both_sexes_sitar_model$data)
+print("Number of patients used in both_sexes SITAR height model")
+length(unique(both_sexes_sitar_model$data$id))
+sink()
+```
+
+
+```{r, calculate R2 for sitar models}
+sink("summary_of_r2_from_sitar_height_models.txt", split=T)
+print("R² for male height SITAR model:")
+residual_variance_male <- male_sitar_model$sigma^2
+random_variance_male <- sum(as.numeric(VarCorr(male_sitar_model)[, "Variance"]))
+fitted_values_male <- fitted(male_sitar_model, level = 0)  # Fitted values without random effects
+fixed_variance_male <- var(fitted_values_male)
+cat("Marginal:")
+(r2_marginal_male_height <- 
+  fixed_variance_male / 
+  (fixed_variance_male + random_variance_male + residual_variance_male))
+cat("Conditional:")
+(r2_conditional_male_height <- 
+  (fixed_variance_male + random_variance_male) / 
+  (fixed_variance_male + random_variance_male + residual_variance_male))
+
+print("R² for fema height SITAR model:")
+residual_variance_fema <- fema_sitar_model$sigma^2
+random_variance_fema <- sum(as.numeric(VarCorr(fema_sitar_model)[, "Variance"]))
+fitted_values_fema <- fitted(fema_sitar_model, level = 0)  # Fitted values without random effects
+fixed_variance_fema <- var(fitted_values_fema)
+cat("Marginal:")
+(r2_marginal_fema_height <- 
+  fixed_variance_fema / 
+  (fixed_variance_fema + random_variance_fema + residual_variance_fema))
+cat("Conditional:")
+(r2_conditional_fema_height <- 
+  (fixed_variance_fema + random_variance_fema) / 
+  (fixed_variance_fema + random_variance_fema + residual_variance_fema))
+
+print("R² for both_sexes height SITAR model:")
+residual_variance_both_sexes <- both_sexes_sitar_model$sigma^2
+random_variance_both_sexes <- sum(as.numeric(VarCorr(both_sexes_sitar_model)[, "Variance"]))
+fitted_values_both_sexes <- fitted(both_sexes_sitar_model, level = 0)  # Fitted values without random effects
+fixed_variance_both_sexes <- var(fitted_values_both_sexes)
+cat("Marginal:")
+(r2_marginal_both_sexes_height <- 
+  fixed_variance_both_sexes / 
+  (fixed_variance_both_sexes + random_variance_both_sexes + residual_variance_both_sexes))
+cat("Conditional:")
+(r2_conditional_both_sexes_height <- 
+  (fixed_variance_both_sexes + random_variance_both_sexes) / 
+  (fixed_variance_both_sexes + random_variance_both_sexes + residual_variance_both_sexes))
+sink()
+```
+
+```{r, calculating who_z_score at the growth spurt}
+#for some people we have a growth spurt before five, so we need code that uses both under five and over five
+
+male_random_effects_height_metrics$who_z_sitar_height_at_latest_peak_height_velocity <-
+  #use ifelse dependent upon age around five
+  ifelse(male_random_effects_height_metrics$age_at_latest_peak_height_velocity>=5,
+  #if it's greater or equal to five we use anthroplus       
+  anthroplus::anthroplus_zscores(
+   sex =                
+     1,
+   age_in_months =      
+     male_random_effects_height_metrics$age_at_latest_peak_height_velocity * 12,
+   height_in_cm =       
+     male_random_effects_height_metrics$height_at_latest_peak_height_velocity
+)$zhfa,
+  #if it's less than five we use anthro:
+  anthro::anthro_zscores(
+   sex =  
+     1,
+   age =
+     male_random_effects_height_metrics$age_at_latest_peak_height_velocity * 12,
+   lenhei =             
+     as.numeric(male_random_effects_height_metrics$height_at_latest_peak_height_velocity), 
+   is_age_in_month = T 
+)$zlen
+)
+
+#show me the ids that don't have one of those
+subset(male_random_effects_height_metrics, is.na(age_at_latest_peak_height_velocity))$id
+```
+
+```{r, show a patient with completely blunted pubertal growth spurt}
+male_individual_patient_random_effects_for_curves_height_id_2287 <- 
+  subset(male_individual_patient_random_effects_for_curves_height, id==2287)
+male_individual_patient_random_effects_for_curves_height_id_2287$height_acceleration_to_next_reading
+
+print("We see some patients from this model with completely blunted growth spurts that ")
+```
+```{r, summary of number of patients with completely blunted growth spurt}
+print("Number of male without a pubertal growth spurt:")
+sum(is.na(male_random_effects_height_metrics$age_at_latest_peak_height_velocity))
+
+print("Number of fema without a pubertal growth spurt:")
+sum(is.na(fema_random_effects_height_metrics$age_at_latest_peak_height_velocity))
+```
+
+
+```{r, summary statistics for age at sitar growth spurt}
+descr(male_random_effects_height_metrics$age_at_latest_peak_height_velocity)
+
+cat("Simple description of age at pubertal growth spurt in male patients\n")
+cat(paste0(
+           round(mean(male_random_effects_height_metrics$age_at_latest_peak_height_velocity, na.rm=T), digits=2),
+           ("\n("),
+           round(as.numeric(sd(male_random_effects_height_metrics$age_at_latest_peak_height_velocity, na.rm=T)), digits=2),
+           (")")
+     ))
+
+cat("Simple description of age at pubertal growth spurt in fema patients\n")
+cat(paste0(
+           round(mean(fema_random_effects_height_metrics$age_at_latest_peak_height_velocity, na.rm=T), digits=2),
+           ("\n("),
+           round(as.numeric(sd(fema_random_effects_height_metrics$age_at_latest_peak_height_velocity, na.rm=T)), digits=2),
+           (")")
+     ))
+```
+
+
+```{r, summary statistics for height at sitar growth spurt}
+descr(male_random_effects_height_metrics$height_velocity_at_latest_peak_height_velocity)
+
+cat("Simple description of age at pubertal growth spurt in male patients\n")
+cat(
+  paste0(
+    round(
+      mean(
+        male_random_effects_height_metrics$height_velocity_at_latest_peak_height_velocity, na.rm=T), digits=2),
+    ("\n("),
+    round(
+      as.numeric(
+        sd(
+          male_random_effects_height_metrics$height_velocity_at_latest_peak_height_velocity, na.rm=T)), digits=2),
+    (")")
+  ))
+
+cat("Simple description of age at pubertal growth spurt in fema patients\n")
+cat(paste0(
+           round(mean(fema_random_effects_height_metrics$height_velocity_at_latest_peak_height_velocity, na.rm=T), digits=2),
+           ("\n("),
+           round(as.numeric(sd(fema_random_effects_height_metrics$height_velocity_at_latest_peak_height_velocity, na.rm=T)), digits=2),
+           (")")
+     ))
+```
+
+
+```{r, summary statistics for height in cm at 18}
+descr(male_random_effects_height_metrics$sitar_height_at_age_18)
+
+cat("Simple description of SITAR predicted height at 18 in male patients\n")
+cat(
+  paste0(
+    round(
+      mean(
+        male_random_effects_height_metrics$sitar_height_at_age_18, na.rm=T), digits=2),
+    ("\n("),
+    round(
+      as.numeric(
+        sd(
+          male_random_effects_height_metrics$sitar_height_at_age_18, na.rm=T)), digits=2),
+    (")")
+  ))
+
+cat("Simple description of SITAR predicted height at 18 in fema patients\n")
+cat(
+  paste0(
+    round(
+      mean(
+        fema_random_effects_height_metrics$sitar_height_at_age_18, na.rm=T), digits=2),
+    ("\n("),
+    round(
+      as.numeric(
+        sd(
+          fema_random_effects_height_metrics$sitar_height_at_age_18, na.rm=T)), digits=2),
+    (")")
+  ))
+```
+
+
+```{r, summary statistics for height z-score at 18}
+descr(male_random_effects_height_metrics$who_z_sitar_height_at_age_18)
+
+cat("Simple description of SITAR predicted height z-score at 18 in male patients\n")
+cat(
+  paste0(
+    round(
+      mean(
+        male_random_effects_height_metrics$who_z_sitar_height_at_age_18, na.rm=T), digits=2),
+    ("\n("),
+    round(
+      as.numeric(
+        sd(
+          male_random_effects_height_metrics$who_z_sitar_height_at_age_18, na.rm=T)), digits=2),
+    (")")
+  ))
+
+cat("Simple description of SITAR predicted height z-score at 18 in fema patients\n")
+cat(
+  paste0(
+    round(
+      mean(
+        fema_random_effects_height_metrics$who_z_sitar_height_at_age_18, na.rm=T), digits=2),
+    ("\n("),
+    round(
+      as.numeric(
+        sd(
+          fema_random_effects_height_metrics$who_z_sitar_height_at_age_18, na.rm=T)), digits=2),
+    (")")
+  ))
+```
+
+```{r, function to calculate height rmse}
+calculate_height_rmse <- 
+  function(model, data) {
+    predictions <- predict(model, newdata = data, type = "response")
+    actuals <- data$interpolated_height
+    sqrt(mean((predictions - actuals)^2))
+  }
+```
+
+
+```{r, calculate height rmse}
+male_height_rmse <-
+calculate_height_rmse(
+  model=male_sitar_model, 
+  data=male_sitar_model$data)
+fema_height_rmse <-
+calculate_height_rmse(
+  model=fema_sitar_model, 
+  data=fema_sitar_model$data)
+cat(paste0("Male height RMSE is ", male_height_rmse, "\n"))
+cat(paste0("Fema height RMSE is ", fema_height_rmse))
+```
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+rm(ar_data)
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_26")
+Sys.time()
+```

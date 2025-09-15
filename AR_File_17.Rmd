@@ -1,0 +1,109 @@
+Load packages and reread files using the prebuilt load files function
+
+```{r, load software packages}
+rm(list = ls())
+
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_15",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+
+```
+
+```{r, saving a version of height and weight before outlier detection and removal}
+#in this frame we fit gam / spline / linear models to interpolate height and weight. When doing so, we use the residuals to flag and adjust outliers. Before we adjust anything, we pull out the variables as they stand before outlier detection
+ar_data$manually_corrected_height_before_outlier_corrections <-
+  ar_data$manually_corrected_height
+ar_data$manually_corrected_weight_before_outlier_corrections <-
+  ar_data$manually_corrected_weight
+```
+
+```{r, turning gestational age into a number and correcting for gestational age}
+ar_data$gestational_age_number <- 
+  as.numeric(gsub(pattern=" weeks", replacement="", x=ar_data$Gestational.Age..weeks....Birth ))
+
+#calculate degree of prematurity
+ar_data$weeks_before_37_gestation <-
+  ifelse((37 - ar_data$gestational_age_number) > 0,
+         37 - ar_data$gestational_age_number,
+         0)
+freq(ar_data$weeks_before_37_gestation)
+
+#if we have a gestational age, we then adjust the age
+ar_data$corrected_gestational_age <-
+  ifelse(!is.na(ar_data$gestational_age_number),
+    ar_data$age_to_use - ar_data$weeks_before_37_gestation/52,
+    ar_data$age_to_use)
+
+review <- ar_data[,c(
+  "age_to_use",
+  "corrected_gestational_age",
+  "gestational_age_number"
+)]
+```
+
+
+```{r, check of ages}
+#here you can assess what you're currently dealing with. creating a and b show that we do not have an age if we don't have a confident date of birth, or we don't have a visit_date_unix, which makes sense. Check those two frames to see if that applies
+age_check_frame <- 
+  ar_data[,c(
+    "id", 
+    "dob_to_use", 
+    "visit_date_unix", 
+    "manually_corrected_longitudinal_date", 
+    "age_to_use")]
+
+age_check_frame <- 
+  subset(age_check_frame, is.na(age_to_use))
+
+descr(ar_data$age_to_use)
+
+descr(ar_data$corrected_gestational_age)
+
+age_check_frame_again <- ar_data[,c(
+  "id_visit_date",
+  "visit_date_unix", 
+  "age_to_use", 
+  "dob_to_use")]
+```
+
+```{r, let's establish how much missing data we have}
+print("number of missing id")
+sum(is.na(ar_data$id))
+
+print("number of missing id_visit_date")
+sum(is.na(ar_data$id_visit_date))
+
+print("Number of missing age_to_use")
+sum(is.na(ar_data$age_to_use))
+```
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_17")
+Sys.time()
+```

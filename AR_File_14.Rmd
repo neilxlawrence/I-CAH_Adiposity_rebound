@@ -1,0 +1,408 @@
+
+```{r, load software packages}
+rm(list = ls())
+
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_13",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+
+```
+
+```{r, create visit number and total visits for patient, and join in latest visit number}
+ar_data <- 
+  ar_data[order(ar_data$id,
+                ar_data$visit_date_unix),] 
+
+ar_data$visit_number <- 
+  ave(ar_data$visit_date_unix, 
+      ar_data$id, 
+      FUN = seq_along)
+
+#then we want to add total number of visits for each patient
+ar_data_latest_visit <- 
+  ar_data %>% 
+  group_by(id) %>% 
+  slice_max(visit_number, 
+            n=1, 
+            with_ties=F)
+
+ar_data_latest_visit_to_join <- 
+  ar_data_latest_visit[,c("id", 
+                          "visit_number")]
+
+ar_data_latest_visit_to_join$total_visits_for_this_patient <- 
+  ar_data_latest_visit_to_join$visit_number
+
+ar_data_latest_visit_to_join$visit_number <- NULL
+
+ar_data_joined <- 
+  dplyr::left_join(ar_data, ar_data_latest_visit_to_join, by="id")
+
+ar_data <- 
+  ar_data_joined
+```
+
+```{r, separate columns to print to csv for manual review}
+#in some cases, we will want the meds data to copy, so can filter out certain rows with just the meds data columns to copy before binding as a new row
+meds_data_to_copy <- 
+  ar_data[,c(
+  "id_visit_date",
+  "daily_preparation_of_GC_to_use",
+  "absolute_total_daily_hydrocortisone_at_visit",
+  "absolute_total_daily_prednisolone_at_visit",
+  "absolute_total_daily_prednisone_at_visit",
+  "absolute_total_daily_dexamethasone_at_visit",
+  "total_daily_fludro_dose",
+#  "Fludrocortisone...Current.Medication",
+#  "Fludrocortisone.frequency...Current.Medication", +salt columns?
+  "Centre",                                             
+  "meds_centre_name_1",                                             
+  "medicine_1",                                                     
+  "GC_dose_1",                                                      
+  "meds_unit_1",                                                    
+  "meds_time_1",                                                    
+  "meds_clock_time_1",                                              
+  "medicine_2",                                                     
+  "GC_dose_2",                                                      
+  "meds_unit_2",                                                    
+  "meds_time_2",                                                    
+  "meds_clock_time_2",                                              
+  "medicine_3",                                                     
+  "GC_dose_3",                                                      
+  "meds_unit_3",                                                    
+  "meds_time_3",                                                    
+  "meds_clock_time_3",                                              
+  "medicine_4",                                                     
+  "GC_dose_4",                                                      
+  "meds_unit_4",                                                    
+  "meds_time_4",                                                    
+  "meds_clock_time_4",                                              
+  "medicine_5",                                                     
+  "GC_dose_5",                                                      
+  "meds_unit_5",                                                    
+  "meds_time_5",                                                    
+  "meds_clock_time_5",                                              
+  "medicine_6",                                                     
+  "GC_dose_6",                                                      
+  "meds_unit_6",                                                    
+  "meds_time_6",                                                    
+  "meds_clock_time_6",                                              
+  "different_GC_used_on_same_day",                                  
+  "absolute_daily_GC_dose_sum",                                     
+  "daily_preparation_of_GC_to_use",                                 
+  "absolute_total_daily_hydrocortisone_at_visit",                   
+  "absolute_total_daily_prednisolone_at_visit",                     
+  "absolute_total_daily_prednisone_at_visit",                       
+  "absolute_total_daily_dexamethasone_at_visit",                    
+  "absolute_total_daily_other_GC_at_visit",                         
+  "total_daily_hydrocortisone_equivalent_at_visit"
+  )]
+
+```
+
+
+
+```{r, now check what I have changed in this frame after contact with centres}
+ar_data$Fludrocortisone...Current.Medication_original_changed <- 
+  ifelse(ar_data$Fludrocortisone...Current.Medication !=
+           ar_data$Fludrocortisone...Current.Medication_original | 
+           is.na(ar_data$Fludrocortisone...Current.Medication) &
+           !is.na(ar_data$Fludrocortisone...Current.Medication_original) | 
+           !is.na(ar_data$Fludrocortisone...Current.Medication) &
+           is.na(ar_data$Fludrocortisone...Current.Medication_original), 1, 0)
+
+ar_data$Fludrocortisone.frequency...Current.Medication_original_changed <-
+  ifelse(ar_data$Fludrocortisone.frequency...Current.Medication !=
+           ar_data$Fludrocortisone.frequency...Current.Medication_original  | 
+           is.na(ar_data$Fludrocortisone.frequency...Current.Medication) &
+           !is.na(ar_data$Fludrocortisone.frequency...Current.Medication_original) | 
+           !is.na(ar_data$Fludrocortisone.frequency...Current.Medication) &
+           is.na(ar_data$Fludrocortisone.frequency...Current.Medication_original), 1, 0)
+
+ar_data$medicine_1_original_changed <- 
+  ifelse(ar_data$medicine_1!=
+           ar_data$medicine_1_original  | 
+           is.na(ar_data$medicine_1) &
+           !is.na(ar_data$medicine_1_original) | 
+           !is.na(ar_data$medicine_1) &
+           is.na(ar_data$medicine_1_original)  , 1, 0)
+
+ar_data$GC_dose_1_original_changed <- 
+  ifelse(ar_data$GC_dose_1 !=
+           ar_data$GC_dose_1_original  | 
+           is.na(ar_data$GC_dose_1) &            
+           !is.na(ar_data$GC_dose_1_original)  | 
+           !is.na(ar_data$GC_dose_1) &            
+           is.na(ar_data$GC_dose_1_original) , 1, 0)
+
+ar_data$meds_unit_1_original_changed <- 
+  ifelse(ar_data$meds_unit_1!=
+           ar_data$meds_unit_1_original  | 
+           is.na(ar_data$meds_unit_1) &            
+           !is.na(ar_data$meds_unit_1_original) | 
+           !is.na(ar_data$meds_unit_1) &            
+           is.na(ar_data$meds_unit_1_original) , 1, 0)
+
+ar_data$meds_time_1_original_changed <- 
+  ifelse(ar_data$meds_time_1!=
+           ar_data$meds_time_1_original  | 
+           is.na(ar_data$meds_time_1) &            
+           !is.na(ar_data$meds_time_1_original)  | 
+           !is.na(ar_data$meds_time_1) &            
+           is.na(ar_data$meds_time_1_original) , 1, 0)
+
+ar_data$meds_clock_time_1_original_changed <- 
+  ifelse(ar_data$meds_clock_time_1!=
+           ar_data$meds_clock_time_1_original  | 
+           is.na(ar_data$meds_clock_time_1) &            
+           !is.na(ar_data$meds_clock_time_1_original) | 
+           !is.na(ar_data$meds_clock_time_1) &            
+           is.na(ar_data$meds_clock_time_1_original) , 1, 0)
+
+ar_data$medicine_2_original_changed <- 
+  ifelse(ar_data$medicine_2!=
+           ar_data$medicine_2_original  | 
+           is.na(ar_data$medicine_2) &          
+           !is.na(ar_data$medicine_2_original)  | 
+           !is.na(ar_data$medicine_2) &          
+           is.na(ar_data$medicine_2_original) , 1, 0)
+
+ar_data$GC_dose_2_original_changed <- 
+  ifelse(ar_data$GC_dose_2!=
+           ar_data$GC_dose_2_original  | 
+           is.na(ar_data$GC_dose_2) &        
+           !is.na(ar_data$GC_dose_2_original)  | 
+           !is.na(ar_data$GC_dose_2) &        
+           is.na(ar_data$GC_dose_2_original) , 1, 0)
+
+ar_data$meds_unit_2_original_changed <- 
+  ifelse(ar_data$meds_unit_2!=ar_data$meds_unit_2_original  | 
+           is.na(ar_data$meds_unit_2) &          
+           !is.na(ar_data$meds_unit_2_original) | 
+           !is.na(ar_data$meds_unit_2) &          
+           is.na(ar_data$meds_unit_2_original) , 1, 0)
+
+ar_data$meds_time_2_original_changed <- 
+  ifelse(ar_data$meds_time_2!=ar_data$meds_time_2_original  | 
+           is.na(ar_data$meds_time_2) &        
+           !is.na(ar_data$meds_time_2_original) | 
+           !is.na(ar_data$meds_time_2) &        
+           is.na(ar_data$meds_time_2_original) , 1, 0)
+
+ar_data$meds_clock_time_2_original_changed <- 
+  ifelse(ar_data$meds_clock_time_2!=ar_data$meds_clock_time_2_original  | 
+           is.na(ar_data$meds_clock_time_2) &         
+           !is.na(ar_data$meds_clock_time_2_original)  | 
+           !is.na(ar_data$meds_clock_time_2) &         
+           is.na(ar_data$meds_clock_time_2_original) , 1, 0)
+
+ar_data$medicine_3_original_changed <- 
+  ifelse(ar_data$medicine_3!=ar_data$medicine_3_original  |
+           is.na(ar_data$medicine_3) &            
+           !is.na(ar_data$medicine_3_original) |
+           !is.na(ar_data$medicine_3) &            
+           is.na(ar_data$medicine_3_original) , 1, 0)
+
+ar_data$GC_dose_3_original_changed <- 
+  ifelse(ar_data$GC_dose_3!=ar_data$GC_dose_3_original  | 
+           is.na(ar_data$GC_dose_3) &            
+           !is.na(ar_data$GC_dose_3_original) | 
+           !is.na(ar_data$GC_dose_3) &            
+           is.na(ar_data$GC_dose_3_original) , 1, 0)
+
+ar_data$meds_unit_3_original_changed <- 
+  ifelse(ar_data$meds_unit_3!=ar_data$meds_unit_3_original  | 
+           is.na(ar_data$meds_unit_3) &            
+           !is.na(ar_data$meds_unit_3_original)| 
+           !is.na(ar_data$meds_unit_3) &            
+           is.na(ar_data$meds_unit_3_original) , 1, 0)
+
+ar_data$meds_time_3_original_changed <- 
+  ifelse(ar_data$meds_time_3!=ar_data$meds_time_3_original  | 
+           is.na(ar_data$meds_time_3) &            
+           !is.na(ar_data$meds_time_3_original) | 
+           !is.na(ar_data$meds_time_3) &            
+           is.na(ar_data$meds_time_3_original) , 1, 0)
+
+ar_data$meds_clock_time_3_original_changed <- 
+  ifelse(ar_data$meds_clock_time_3!=ar_data$meds_clock_time_3_original  | 
+           is.na(ar_data$meds_clock_time_3) &            
+           !is.na(ar_data$meds_clock_time_3_original) | 
+           !is.na(ar_data$meds_clock_time_3) &            
+           is.na(ar_data$meds_clock_time_3_original) , 1, 0)
+
+ar_data$different_GC_used_on_same_day_original_changed <- 
+  ifelse(ar_data$different_GC_used_on_same_day!=ar_data$different_GC_used_on_same_day_original  | 
+           is.na(ar_data$different_GC_used_on_same_day) &            
+           !is.na(ar_data$different_GC_used_on_same_day_original) | 
+           !is.na(ar_data$different_GC_used_on_same_day) &            
+           is.na(ar_data$different_GC_used_on_same_day_original) , 1, 0)
+
+ar_data$absolute_daily_GC_dose_sum_original_changed <- 
+  ifelse(ar_data$absolute_daily_GC_dose_sum !=ar_data$absolute_daily_GC_dose_sum_original  | 
+           is.na(ar_data$absolute_daily_GC_dose_sum) &            
+           !is.na(ar_data$absolute_daily_GC_dose_sum_original)  | 
+           !is.na(ar_data$absolute_daily_GC_dose_sum) &            
+           is.na(ar_data$absolute_daily_GC_dose_sum_original) , 1, 0)
+
+ar_data$daily_preparation_of_GC_to_use_original_changed <- 
+  ifelse(ar_data$daily_preparation_of_GC_to_use!=ar_data$daily_preparation_of_GC_to_use_original  | 
+           is.na(ar_data$daily_preparation_of_GC_to_use) &           
+           !is.na(ar_data$daily_preparation_of_GC_to_use_original)  | 
+           !is.na(ar_data$daily_preparation_of_GC_to_use) &           
+           is.na(ar_data$daily_preparation_of_GC_to_use_original) , 1, 0)
+
+ar_data$absolute_total_daily_hydrocortisone_at_visit_original_changed <-
+  ifelse(ar_data$absolute_total_daily_hydrocortisone_at_visit!=ar_data$absolute_total_daily_hydrocortisone_at_visit_original  |
+           is.na(ar_data$absolute_total_daily_hydrocortisone_at_visit) &            
+           !is.na(ar_data$absolute_total_daily_hydrocortisone_at_visit_original) |
+           !is.na(ar_data$absolute_total_daily_hydrocortisone_at_visit) &            
+           is.na(ar_data$absolute_total_daily_hydrocortisone_at_visit_original) , 1, 0)
+
+ar_data$absolute_total_daily_prednisolone_at_visit_original_changed <-
+  ifelse(ar_data$absolute_total_daily_prednisolone_at_visit!=ar_data$absolute_total_daily_prednisolone_at_visit_original  
+         | is.na(ar_data$absolute_total_daily_prednisolone_at_visit) &            
+           !is.na(ar_data$absolute_total_daily_prednisolone_at_visit_original) 
+         | !is.na(ar_data$absolute_total_daily_prednisolone_at_visit) &            
+           is.na(ar_data$absolute_total_daily_prednisolone_at_visit_original) , 1, 0)
+
+ar_data$absolute_total_daily_prednisone_at_visit_original_changed <-
+  ifelse(ar_data$absolute_total_daily_prednisone_at_visit!=ar_data$absolute_total_daily_prednisone_at_visit_original  
+         | is.na(ar_data$absolute_total_daily_prednisone_at_visit) &            
+           !is.na(ar_data$absolute_total_daily_prednisone_at_visit_original)         
+         | !is.na(ar_data$absolute_total_daily_prednisone_at_visit) &            
+           is.na(ar_data$absolute_total_daily_prednisone_at_visit_original) , 1, 0)
+
+ar_data$absolute_total_daily_dexamethasone_at_visit_original_changed <-
+  ifelse(ar_data$absolute_total_daily_dexamethasone_at_visit!=ar_data$absolute_total_daily_dexamethasone_at_visit_original  |
+           is.na(ar_data$absolute_total_daily_dexamethasone_at_visit) &            
+           !is.na(ar_data$absolute_total_daily_dexamethasone_at_visit_original)  | 
+           !is.na(ar_data$absolute_total_daily_dexamethasone_at_visit) &            
+           is.na(ar_data$absolute_total_daily_dexamethasone_at_visit_original) , 1, 0)
+
+ar_data$absolute_total_daily_other_GC_at_visit_original_changed <-
+  ifelse(ar_data$absolute_total_daily_other_GC_at_visit!=ar_data$absolute_total_daily_other_GC_at_visit_original  | is.na(ar_data$absolute_total_daily_other_GC_at_visit) &            
+           !is.na(ar_data$absolute_total_daily_other_GC_at_visit_original)  | 
+           !is.na(ar_data$absolute_total_daily_other_GC_at_visit) &            
+           is.na(ar_data$absolute_total_daily_other_GC_at_visit_original) , 1, 0)
+
+ar_data$total_daily_hydrocortisone_equivalent_at_visit_original_changed <-
+  ifelse(ar_data$total_daily_hydrocortisone_equivalent_at_visit!=
+           ar_data$total_daily_hydrocortisone_equivalent_at_visit_original  |
+           is.na(ar_data$total_daily_hydrocortisone_equivalent_at_visit) &            
+           !is.na(ar_data$total_daily_hydrocortisone_equivalent_at_visit_original) |
+           !is.na(ar_data$total_daily_hydrocortisone_equivalent_at_visit) &            
+           is.na(ar_data$total_daily_hydrocortisone_equivalent_at_visit_original) , 1, 0)
+
+ar_data$fludrocortisone_dose_original_changed <- 
+  ifelse(ar_data$fludrocortisone_dose!=ar_data$fludrocortisone_dose_original  | 
+           is.na(ar_data$fludrocortisone_dose) &            
+           !is.na(ar_data$fludrocortisone_dose_original)  | 
+           !is.na(ar_data$fludrocortisone_dose) &            
+           is.na(ar_data$fludrocortisone_dose_original) , 1, 0)
+
+ar_data$total_daily_fludro_dose_original_changed <- 
+  ifelse(ar_data$total_daily_fludro_dose != ar_data$total_daily_fludro_dose_original  | 
+           is.na(ar_data$total_daily_fludro_dose) &            
+           !is.na(ar_data$total_daily_fludro_dose_original)   | 
+           !is.na(ar_data$total_daily_fludro_dose) &            
+           is.na(ar_data$total_daily_fludro_dose_original) , 1, 0)
+
+```
+
+```{r, print number of rows of important dose columns}
+print("sum of Fludrocortisone...Current.Medication_original_changed")
+sum(ar_data$Fludrocortisone...Current.Medication_original_changed, na.rm=T )
+print("sum of Fludrocortisone.frequency...Current.Medication_original_changed")
+sum(ar_data$Fludrocortisone.frequency...Current.Medication_original_changed, na.rm=T )
+print("sum of medicine_1_original_changed")
+sum(ar_data$medicine_1_original_changed, na.rm=T )
+print("sum of GC_dose_1_original_changed")
+sum(ar_data$GC_dose_1_original_changed, na.rm=T )
+print("sum of meds_unit_1_original_changed")
+sum(ar_data$meds_unit_1_original_changed, na.rm=T )
+print("sum of meds_time_1_original_changed")
+sum(ar_data$meds_time_1_original_changed, na.rm=T )
+print("sum of meds_clock_time_1_original_changed")
+sum(ar_data$meds_clock_time_1_original_changed, na.rm=T )
+print("sum of medicine_2_original_changed")
+sum(ar_data$medicine_2_original_changed, na.rm=T )
+print("sum of GC_dose_2_original_changed")
+sum(ar_data$GC_dose_2_original_changed, na.rm=T )
+print("sum of meds_unit_2_original_changed")
+sum(ar_data$meds_unit_2_original_changed, na.rm=T )
+print("sum of meds_time_2_original_changed")
+sum(ar_data$meds_time_2_original_changed, na.rm=T )
+print("sum of meds_clock_time_2_original_changed")
+sum(ar_data$meds_clock_time_2_original_changed, na.rm=T )
+print("sum of medicine_3_original_changed")
+sum(ar_data$medicine_3_original_changed, na.rm=T )
+print("sum of GC_dose_3_original_changed")
+sum(ar_data$GC_dose_3_original_changed, na.rm=T )
+print("sum of meds_unit_3_original_changed")
+sum(ar_data$meds_unit_3_original_changed, na.rm=T )
+print("sum of meds_time_3_original_changed")
+sum(ar_data$meds_time_3_original_changed, na.rm=T )
+print("sum of meds_clock_time_3_original_changed")
+sum(ar_data$meds_clock_time_3_original_changed, na.rm=T )
+print("sum of different_GC_used_on_same_day_original_changed")
+sum(ar_data$different_GC_used_on_same_day_original_changed, na.rm=T )
+print("sum of absolute_daily_GC_dose_sum_original_changed")
+sum(ar_data$absolute_daily_GC_dose_sum_original_changed, na.rm=T )
+print("sum of daily_preparation_of_GC_to_use_original_changed")
+sum(ar_data$daily_preparation_of_GC_to_use_original_changed, na.rm=T )
+print("sum of absolute_total_daily_hydrocortisone_at_visit_original_changed")
+sum(ar_data$absolute_total_daily_hydrocortisone_at_visit_original_changed, na.rm=T )
+print("sum of absolute_total_daily_prednisolone_at_visit_original_changed")
+sum(ar_data$absolute_total_daily_prednisolone_at_visit_original_changed, na.rm=T )
+print("sum of absolute_total_daily_prednisone_at_visit_original_changed")
+sum(ar_data$absolute_total_daily_prednisone_at_visit_original_changed, na.rm=T )
+print("sum of absolute_total_daily_dexamethasone_at_visit_original_changed")
+sum(ar_data$absolute_total_daily_dexamethasone_at_visit_original_changed, na.rm=T )
+print("sum of absolute_total_daily_other_GC_at_visit_original_changed")
+sum(ar_data$absolute_total_daily_other_GC_at_visit_original_changed, na.rm=T )
+print("sum of total_daily_hydrocortisone_equivalent_at_visit_original_changed")
+sum(ar_data$total_daily_hydrocortisone_equivalent_at_visit_original_changed, na.rm=T )
+print("sum of fludrocortisone_dose_original_changed")
+sum(ar_data$fludrocortisone_dose_original_changed, na.rm=T )
+print("sum of total_daily_fludro_dose_original_changed")
+sum(ar_data$total_daily_fludro_dose_original_changed, na.rm=T )
+print("sum of fludrocortisone_dose_original_changed")
+sum(ar_data$fludrocortisone_dose_original_changed, na.rm=T )
+print("sum of total_daily_fludro_dose_original_changed")
+sum(ar_data$total_daily_fludro_dose_original_changed, na.rm=T )
+
+descr(ar_data$total_daily_fludro_dose)
+```
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_14")
+
+Sys.time()
+```
+

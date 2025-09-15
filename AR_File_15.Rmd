@@ -1,0 +1,677 @@
+
+```{r, load software packages}
+rm(list = ls())
+
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_14",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+```
+
+
+```{r, correct inappropriate carry forwards of Not known for fludrocortisone - do this for all patients}
+#if a patient has actively declared 'Not known' for whether they are taking GC, then they shouldn't have dose information
+#before we do a blanket correction here, we should record how many this applies to 
+print("This is the number of not knowns we have registered in the file. If it is registered as not known, we have to give it up and lose it from the data.")
+freq(ar_data$Fludrocortisone...Current.Medication)
+
+ar_data_FC_not_known <-
+  subset(ar_data, Fludrocortisone...Current.Medication=="Not known")
+```
+
+```{r, correct inappropriate does of Not known for fludrocortisone}
+#if they are declared not known to be taking fludrocortisone, then there dose must be recorded as not known
+ar_data$total_daily_fludro_dose <-
+    ifelse(ar_data$Fludrocortisone...Current.Medication=="Not known",
+           NA,
+           ar_data$total_daily_fludro_dose)
+```
+
+
+```{r, Impute zero fludro dose for all those with No for Fludrocortisone...Current.Medication_carried_to_use }
+ar_data$total_daily_fludro_dose_with_zero <-
+  ar_data$total_daily_fludro_dose
+
+ar_data$total_daily_fludro_dose_with_zero <-
+  ifelse(ar_data$Fludrocortisone...Current.Medication=="No", 
+  0, 
+  ar_data$total_daily_fludro_dose_with_zero)
+
+```
+
+```{r, correct inappropriate doses of Not known for salt - do this for all patients}
+ar_data$converted_salt_mass <-
+    ifelse(ar_data$Salt.replacement...Current.Medication=="Not known",
+           NA,
+           ar_data$converted_salt_mass)
+  
+  ar_data$converted_salt_per_kg_or_absolute <-
+    ifelse(ar_data$Salt.replacement...Current.Medication=="Not known",
+           NA,
+           ar_data$converted_salt_per_kg_or_absolute)
+```
+
+```{r, Impute zero salt dose for all those with No for Salt.replacement...Current.Medication}
+ar_data$converted_salt_mass_with_zero <-
+  ar_data$converted_salt_mass
+
+ar_data$converted_salt_mass_with_zero <-
+  ifelse(ar_data$Salt.replacement...Current.Medication=="No", 
+  0, 
+  ar_data$converted_salt_mass_with_zero)
+
+```
+
+```{r, start by establishing maximum limits for LOCF. this is best done by creating another column that we can adjust depending on other columns. This way we can add extra riders into these clauses that allow us to not carry forward if we have reason not to in another column}
+#for those under 1 year, the maximum is:
+ar_data$maximum_years_LOCF <-
+  ifelse(
+    ar_data$age_to_use < 1,
+    0.5,
+    NA
+  )
+#for those under 3 years, the maximum is:
+ar_data$maximum_years_LOCF <-
+  ifelse(
+    ar_data$age_to_use >= 1 &
+    ar_data$age_to_use < 3 ,
+    1,
+    ar_data$maximum_years_LOCF
+  )
+#for those under 5 years, the maximum is:
+ar_data$maximum_years_LOCF <-
+  ifelse(
+    ar_data$age_to_use >= 3 &
+    ar_data$age_to_use < 5 ,
+    2,
+    ar_data$maximum_years_LOCF
+  )
+#for those under 10 years, the maximum is:
+ar_data$maximum_years_LOCF <-
+  ifelse(
+    ar_data$age_to_use >= 5 &
+    ar_data$age_to_use < 10 ,
+    3,
+    ar_data$maximum_years_LOCF
+  )
+#for those under 15 years, the maximum is:
+ar_data$maximum_years_LOCF <-
+  ifelse(
+    ar_data$age_to_use >= 10 &
+    ar_data$age_to_use < 15 ,
+    4,
+    ar_data$maximum_years_LOCF
+  )
+#for those under 20 years, the maximum is:
+ar_data$maximum_years_LOCF <-
+  ifelse(
+    ar_data$age_to_use >= 15 &
+    ar_data$age_to_use < 20 ,
+    5,
+    ar_data$maximum_years_LOCF
+  )
+#for those over 20 years, the maximum is:
+ar_data$maximum_years_LOCF <-
+  ifelse(
+    ar_data$age_to_use >= 20 &
+    ar_data$age_to_use < 80 ,
+    10,
+    ar_data$maximum_years_LOCF
+  )
+
+  
+```
+
+```{r, also establish maximum limits for NOCB. this is best done by creating another column that we can adjust depending on other columns. This way we can add extra riders into these clauses that allow us to not carry forward if we have reason not to in another column}
+#for those under 1 year, the maximum is:
+ar_data$maximum_years_NOCB <-
+  ifelse(
+    ar_data$age_to_use < 1,
+    0.5,
+    NA
+  )
+#for those under 3 years, the maximum is:
+ar_data$maximum_years_NOCB <-
+  ifelse(
+    ar_data$age_to_use >= 1 &
+    ar_data$age_to_use < 3 ,
+    1,
+    ar_data$maximum_years_NOCB
+  )
+#for those under 5 years, the maximum is:
+ar_data$maximum_years_NOCB <-
+  ifelse(
+    ar_data$age_to_use >= 3 &
+    ar_data$age_to_use < 5 ,
+    2,
+    ar_data$maximum_years_NOCB
+  )
+#for those under 10 years, the maximum is:
+ar_data$maximum_years_NOCB <-
+  ifelse(
+    ar_data$age_to_use >= 5 &
+    ar_data$age_to_use < 10 ,
+    3,
+    ar_data$maximum_years_NOCB
+  )
+#for those under 15 years, the maximum is:
+ar_data$maximum_years_NOCB <-
+  ifelse(
+    ar_data$age_to_use >= 10 &
+    ar_data$age_to_use < 15 ,
+    4,
+    ar_data$maximum_years_NOCB
+  )
+#for those under 20 years, the maximum is:
+ar_data$maximum_years_NOCB <-
+  ifelse(
+    ar_data$age_to_use >= 15 &
+    ar_data$age_to_use < 20 ,
+    5,
+    ar_data$maximum_years_NOCB
+  )
+#for those over 20 years, the maximum is:
+ar_data$maximum_years_NOCB <-
+  ifelse(
+    ar_data$age_to_use >= 20 &
+    ar_data$age_to_use < 80 ,
+    10,
+    ar_data$maximum_years_NOCB
+  )
+
+
+```
+
+```{r, create a frame of the visit date of every piece of data, retaining id and id_visit_date as previous}
+#before we carry anything forward, we want a visit date for all data. Then we will be able to use last observation carried forward for these visit dates, to find out where any last observation carried forward data has come from
+ar_data_visit_dates_of_data <-
+  ar_data
+
+#loop around every column taking the visit date if there is data in the cell
+for (i in (1:ncol(ar_data_visit_dates_of_data))){
+ar_data_visit_dates_of_data[i] <- 
+  ifelse(is.na(ar_data_visit_dates_of_data[[i]]), 
+         NA, 
+         (ar_data_visit_dates_of_data$visit_date_unix))
+
+#as we've used ifelse, we have to convert back from UNIX
+ar_data_visit_dates_of_data[[i]] <- 
+  as.POSIXct(ar_data_visit_dates_of_data[[i]] , origin="1970-01-01")
+}
+
+#however, we don't want the date of the id, or the id visit_date, so we remove them
+ar_data_visit_dates_of_data$id <- NULL
+ar_data_visit_dates_of_data$id_visit_date <- NULL
+
+#then bind the original columns back in 
+id_column <- data.frame(id=ar_data$id)
+id_visit_date_column <- data.frame(id_visit_date=ar_data$id_visit_date)
+ar_data_visit_dates_of_data <-
+  cbind(
+    id_column,
+    id_visit_date_column,
+    ar_data_visit_dates_of_data
+  )
+
+```
+
+```{r, create a frame of all columns with next observation carried backward - NOCB}
+library(zoo)
+
+ar_data_with_NOCB <-
+  ar_data %>%
+    group_by(id) %>% 
+    mutate_all(funs(zoo::na.locf(., na.rm = FALSE, fromLast=T))) #fromLast is what turns it into NOCB
+
+#that gives us a whole frame of grouped next observation carried backward
+```
+
+```{r, create a frame of origin of NOCB data}
+#we use the ar_data_visit_dates_of_data frame and perform NOCB on it, to have a frame that we can ally the NOCB data to
+ar_data_visit_dates_of_NOCB <-
+  ar_data_visit_dates_of_data %>%
+    group_by(id) %>% 
+    mutate_all(funs(zoo::na.locf(., na.rm = FALSE, fromLast=T ))) #fromLast is what turns it into NOCB
+
+```
+
+```{r, create a frame of all columns with last observation carried forward - LOCF}
+ar_data_with_LOCF <-
+  ar_data %>%
+    group_by(id) %>% 
+    mutate_all(funs(zoo::na.locf(., na.rm = FALSE, fromLast=F))) #fromLast False keeps it as LOCF
+
+#that gives us a whole frame of grouped last observation carried forward
+```
+
+```{r, create a frame of origin of LOCF data}
+#we use the ar_data_visit_dates_of_data frame and perform LOCF on it, to have a frame that we can ally the LOCF data to
+ar_data_visit_dates_of_LOCF <-
+  ar_data_visit_dates_of_data %>%
+    group_by(id) %>% 
+    mutate_all(funs(zoo::na.locf(., na.rm = FALSE, fromLast=F))) #fromLast False keeps it as LOCF
+
+```
+
+```{r, insert all columns with LOCF and NOCB and dates into the main frame for glucocorticoids}
+#now we can just put the columns we want into the main frame
+
+ar_data$GC_dose_1_LOCF_raw <-
+  ar_data_with_LOCF$GC_dose_1
+
+ar_data$GC_dose_1_LOCF_origin_date <-
+  ar_data_visit_dates_of_LOCF$GC_dose_1
+
+ar_data$GC_dose_1_NOCB_raw <-
+  ar_data_with_NOCB$GC_dose_1
+
+ar_data$GC_dose_1_NOCB_origin_date <-
+  ar_data_visit_dates_of_NOCB$GC_dose_1
+```
+
+```{r, check my results of last observation carried forward and backward}
+check_LOCF_for_GC <-
+  ar_data[,c("id",
+             "visit_date",
+             "GC_dose_1",
+             "GC_dose_1_LOCF_raw",
+             "GC_dose_1_LOCF_origin_date",
+             "GC_dose_1_NOCB_raw",
+             "GC_dose_1_NOCB_origin_date"
+             )]
+
+write.csv(check_LOCF_for_GC, "check_LOCF_for_GC.csv")
+```
+
+```{r, create a function that adds each of the necessary columns to the main frame}
+#name the function and tell it what to do
+use_LOCF_and_NOCB_with_limits <- 
+  function(name_of_column){
+
+#to make this function more universal you would want to name all of the frames you enter into it. This would not only be ar_data, but also ar_data_with_LOCF etc. Or you could get it to carry forward and backward all dates within the same function. Keeping it all separate and named above makes it slightly more granular  
+  
+#name_of_column <- 
+#  "absolute_total_daily_hydrocortisone_at_visit"
+
+column_from_LOCF_raw <- 
+  ar_data_with_LOCF[,name_of_column]
+names(column_from_LOCF_raw)[names(column_from_LOCF_raw)==name_of_column] <- 
+  paste0("from_LOCF_raw")
+
+
+column_from_LOCF_origin_date <- 
+  ar_data_visit_dates_of_LOCF[,name_of_column]
+names(column_from_LOCF_origin_date)[names(column_from_LOCF_origin_date)==name_of_column] <- 
+  paste0("from_LOCF_origin_date")
+
+
+visit_dates_LOCF <-
+  data.frame(
+    visit_date=ar_data$visit_date,
+    visit_date_of_LOCF=as.vector(ar_data_visit_dates_of_LOCF[,name_of_column]))
+#the problem is, the name of the column gets retained, so we force that into a standard name
+names(visit_dates_LOCF)[2] <- "visit_date_of_LOCF" 
+
+visit_dates_LOCF$years_from_LOCF <-
+  as.numeric(difftime(visit_dates_LOCF$visit_date, visit_dates_LOCF$visit_date_of_LOCF, units="days"))/365.25
+
+#then we pull out just the calculated column we care about
+column_years_from_LOCF <-
+  data.frame(to_rename = visit_dates_LOCF$years_from_LOCF)
+names(column_years_from_LOCF)[names(column_years_from_LOCF)=="to_rename"] <- 
+  paste0("years_from_LOCF")
+
+column_from_NOCB_raw <- 
+  ar_data_with_NOCB[,name_of_column]
+names(column_from_NOCB_raw)[names(column_from_NOCB_raw)==name_of_column] <- 
+  paste0("from_NOCB_raw")
+
+column_from_NOCB_origin_date <- 
+  ar_data_visit_dates_of_NOCB[,name_of_column]
+names(column_from_NOCB_origin_date)[names(column_from_NOCB_origin_date)==name_of_column] <- 
+  paste0("from_NOCB_origin_date")
+
+visit_dates_NOCB <-
+  data.frame(
+    visit_date=ar_data$visit_date,
+    visit_date_of_NOCB=as.vector(ar_data_visit_dates_of_NOCB[,name_of_column]))
+#the problem is, the name of the column gets retained, so we force that into a standard name
+names(visit_dates_NOCB)[2] <- "visit_date_of_NOCB" 
+
+#remember when we calculate years from NOCB, the difference is the other way around
+visit_dates_NOCB$years_from_NOCB <-
+  as.numeric(difftime(visit_dates_NOCB$visit_date_of_NOCB, 
+                      visit_dates_NOCB$visit_date, 
+                      units="days"))/365.25
+
+#then we pull out just the calculated column we care about
+column_years_from_NOCB <-
+  data.frame(to_rename = visit_dates_NOCB$years_from_NOCB)
+names(column_years_from_NOCB)[names(column_years_from_NOCB)=="to_rename"] <- 
+  paste0("years_from_NOCB")
+
+calculated_frame <-
+  cbind(
+    ar_data[,"id"],
+    ar_data[,"age_to_use"],
+    ar_data[,"visit_date"],
+    ar_data[,"maximum_years_LOCF"],
+    ar_data[,"maximum_years_NOCB"],
+    ar_data[,name_of_column],
+    column_from_LOCF_raw,
+    column_from_LOCF_origin_date,
+    column_years_from_LOCF,
+    column_from_NOCB_raw,
+    column_from_NOCB_origin_date,
+    column_years_from_NOCB
+  )
+
+
+#then we can create a column to use by assessing the column_years_from_LOCF against ar_data$maximum_years_LOCF
+calculated_frame$column_to_use <-
+  ifelse(calculated_frame$years_from_LOCF <= calculated_frame$maximum_years_LOCF,
+         calculated_frame$from_LOCF_raw,
+         NA)
+
+#then we can alter the column to use IF IT IS CURRENTLY EMPTY by assessing the column_years_from_NOCB against ar_data$maximum_years_NOCB
+calculated_frame$column_to_use <-
+  ifelse(is.na(calculated_frame$column_to_use) &
+         calculated_frame$years_from_NOCB <= calculated_frame$maximum_years_NOCB,
+         calculated_frame$from_NOCB_raw,
+         calculated_frame$column_to_use)
+
+#create a directory where we show all the columns we've done this to
+dir.create("locf_and_nocb_calculation_frames", showWarnings = FALSE)
+write.csv(calculated_frame, 
+          paste0("locf_and_nocb_calculation_frames/", 
+                 name_of_column, 
+                 "_calculated_frame.csv"),
+          row.names = F)
+sink(paste0("locf_and_nocb_calculation_frames/", 
+                 name_of_column, 
+                 "_missing_description.txt"))
+print("This file will display descriptions of the original and imputed data if it is numeric. If a character column, it will display frequencies:")
+if (is.numeric(calculated_frame$column_to_use)){
+  print("Name of columne is : ")
+  print(name_of_column)
+  print("Description of original data:")
+  print(descr(calculated_frame[,name_of_column]))
+  print("Description of data using hierarchical LOCF and NOCB:")
+  print(descr(calculated_frame$column_to_use))
+}
+if (is.character(calculated_frame$column_to_use)){
+  print("Name of columne is : ")
+  print(name_of_column)
+  print("Description of original data:")
+  print(freq(calculated_frame[,name_of_column]))
+  print("Description of data using hierarchical LOCF and NOCB:")
+  print(freq(calculated_frame$column_to_use))
+}
+sink()
+
+#then we pull out just the carried forward number to use
+carry_frame_to_join <-
+  data.frame(
+    id_visit_date=ar_data$id_visit_date,
+    column_to_use=calculated_frame$column_to_use
+  )
+#now we have something to join we can rename the column of interest
+names(carry_frame_to_join)[names(carry_frame_to_join)=="column_to_use"] <- 
+  paste0(name_of_column, "_carried_to_use")
+
+#then right at the end of the function we add it into our frame
+ar_data_with_column <-
+  left_join(ar_data, 
+            carry_frame_to_join, 
+            by="id_visit_date")
+
+#assign our version with the column to ar_data within the global environment
+assign(x="ar_data", 
+       value=ar_data_with_column, 
+       env=.GlobalEnv)
+
+}
+
+
+```
+
+```{r, apply LOCF and NOCB function to glucocorticoid columns}
+#apply to hydrocortisone
+use_LOCF_and_NOCB_with_limits("daily_preparation_of_GC_to_use") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+use_LOCF_and_NOCB_with_limits("total_daily_hydrocortisone_equivalent_at_visit") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+use_LOCF_and_NOCB_with_limits("absolute_total_daily_hydrocortisone_at_visit") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+use_LOCF_and_NOCB_with_limits("absolute_total_daily_prednisolone_at_visit") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+use_LOCF_and_NOCB_with_limits("absolute_total_daily_prednisone_at_visit") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+use_LOCF_and_NOCB_with_limits("absolute_total_daily_dexamethasone_at_visit") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+use_LOCF_and_NOCB_with_limits("absolute_total_daily_cortisone_acetate_at_visit") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+use_LOCF_and_NOCB_with_limits("absolute_daily_GC_dose_sum") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+use_LOCF_and_NOCB_with_limits("Glucocorticoids...Current.Medication") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+use_LOCF_and_NOCB_with_limits("Fludrocortisone...Current.Medication") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+use_LOCF_and_NOCB_with_limits("Salt.replacement...Current.Medication") #note if you add any columns to add here, you also have to add manual corrections to when you don't want them carried below
+
+
+```
+
+```{r, correct inappropriate carry forwards of Not known for glucocorticoids - do this for all patients}
+#if a patient has actively declared 'Not known' for whether they are taking GC, then they shouldn't have dose information
+#before we do a blanket correction here, we should record how many this applies to 
+print("This is the number of not knowns we have registered in the file. If it is registered as not known, we have to give it up and lose it from the data. ")
+freq(ar_data$Glucocorticoids...Current.Medication_carried_to_use)
+
+ar_data_GC_not_known <-
+  subset(ar_data, Glucocorticoids...Current.Medication_carried_to_use=="Not known")
+
+ar_data_patients_GC_not_known  <-
+  subset(ar_data, id %in% ar_data_GC_not_known$id)[,c(
+    "id",
+    "id_visit_date",
+    "Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV..",
+    "total_daily_fludro_dose",
+    "converted_salt_mass",
+    "Glucocorticoids...Current.Medication_original",
+    "Glucocorticoids...Current.Medication",
+    "Glucocorticoids...Current.Medication_carried_to_use",
+    "Glucocorticoids.note...Current.Medication",
+    "total_daily_hydrocortisone_equivalent_at_visit_carried_to_use",
+    "absolute_daily_GC_dose_sum",
+    "daily_preparation_of_GC_to_use",
+    "total_daily_hydrocortisone_equivalent_at_visit",
+    "Daily.adherence.to.therapy...Current.Medication",
+    "Has.treatment.changed.since.last.visit...Current.Medication",
+    "Why.was.treatment.changed...Current.Medication",
+    "medicine_1",
+    "GC_dose_1",
+    "meds_unit_1")]
+
+write.csv(ar_data_patients_GC_not_known, "ar_data_GC_not_known.csv")
+
+  ar_data$daily_preparation_of_GC_to_use_carried_to_use <-
+    ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$daily_preparation_of_GC_to_use_carried_to_use)
+  
+  ar_data$total_daily_hydrocortisone_equivalent_at_visit_carried_to_use <-
+    ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$total_daily_hydrocortisone_equivalent_at_visit_carried_to_use)
+  
+  ar_data$absolute_total_daily_hydrocortisone_at_visit_carried_to_use <-
+    ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$absolute_total_daily_hydrocortisone_at_visit_carried_to_use)
+  
+  ar_data$absolute_total_daily_prednisolone_at_visit_carried_to_use <-
+    ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$absolute_total_daily_prednisolone_at_visit_carried_to_use)
+  
+  ar_data$absolute_total_daily_prednisone_at_visit_carried_to_use <-
+    ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$absolute_total_daily_prednisone_at_visit_carried_to_use)
+  
+  ar_data$absolute_total_daily_dexamethasone_at_visit_carried_to_use <-
+    ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$absolute_total_daily_dexamethasone_at_visit_carried_to_use)
+  
+  ar_data$absolute_total_daily_cortisone_acetate_at_visit_carried_to_use <-
+    ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$absolute_total_daily_cortisone_acetate_at_visit_carried_to_use)
+  
+  ar_data$absolute_total_daily_hydrocortisone_at_visit_carried_to_use <-
+    ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$absolute_total_daily_hydrocortisone_at_visit_carried_to_use)
+  
+  ar_data$absolute_daily_GC_dose_sum_carried_to_use <-
+    ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$absolute_daily_GC_dose_sum_carried_to_use)
+
+
+
+```
+
+
+```{r, apply LOCF and NOCB to fludrocortisone column with zero}
+#apply to fludrocortisone
+use_LOCF_and_NOCB_with_limits("total_daily_fludro_dose_with_zero")
+```
+
+```{r, correct inappropriate carry forwards of Not known for fludrocortisone again now we have carried forward as we have extra data from the possible correction column to use}
+ar_data$total_daily_fludro_dose_with_zero_carried_to_use <-
+    ifelse(ar_data$Fludrocortisone...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$total_daily_fludro_dose_with_zero_carried_to_use)
+```
+
+```{r, create a check frame of fludrocortisone}
+check_LOCF_for_fludrocortisone <-
+  ar_data[,c("id",
+             "visit_date",
+             "age_to_use",
+             "Fludrocortisone...Current.Medication_carried_to_use",
+             "total_daily_fludro_dose",
+             "total_daily_fludro_dose_with_zero_carried_to_use"
+             )]
+
+check_LOCF_for_fludrocortisone_with_no <-
+  subset(check_LOCF_for_fludrocortisone,
+         Fludrocortisone...Current.Medication_carried_to_use=="No")
+descr(check_LOCF_for_fludrocortisone_with_no$total_daily_fludro_dose_with_zero_carried_to_use)
+
+```
+
+Now that we have zero doses of salt and corrections made for No and Not Known, we can carry forward
+
+```{r, apply LOCF and NOCB to salts columns that have the mass of salt and whether they will later need correcting for weight}
+use_LOCF_and_NOCB_with_limits("converted_salt_mass_with_zero")
+use_LOCF_and_NOCB_with_limits("converted_salt_per_kg_or_absolute")
+```
+
+```{r, correct inappropriate doses of Not known for salt using the carried to use column - do this for all patients}
+ar_data$converted_salt_mass_with_zero_carried_to_use <-
+    ifelse(ar_data$Salt.replacement...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$converted_salt_mass_with_zero_carried_to_use)
+  
+  ar_data$converted_salt_per_kg_or_absolute_carried_to_use <-
+    ifelse(ar_data$Salt.replacement...Current.Medication_carried_to_use=="Not known",
+           NA,
+           ar_data$converted_salt_per_kg_or_absolute_carried_to_use)
+```
+
+```{r, correct inappropriate doses of No for salt using the carried to use column}
+ar_data$converted_salt_mass_with_zero_carried_to_use <-
+  ifelse(ar_data$Salt.replacement...Current.Medication_carried_to_use=="No", 
+  0, 
+  ar_data$converted_salt_mass_with_zero)
+```
+
+
+
+
+
+```{r, check consistency between Fludrocortisone...Current.Medication_carried_to_use and reported dosing of fludro}
+print("Description of fludrocortisone treatmnet:")
+freq(ar_data$Fludrocortisone...Current.Medication_carried_to_use)
+print("Description of fludrocortisone dose:")
+descr(ar_data$fludrocortisone_dose)
+print("Description of fludrocortisone frequency:")
+descr(ar_data$fludrocortisone_frequency_number)
+print("Description of fludrocortisone frequency:")
+freq(ar_data$Fludrocortisone.frequency...Current.Medication)
+
+ar_data$fludro_dose_but_registry_not_taking <-
+  ifelse(ar_data$Fludrocortisone...Current.Medication_carried_to_use=="No" &
+           ar_data$fludrocortisone_dose>0,
+         1,
+         0)
+
+freq(ar_data$fludro_dose_but_registry_not_taking )
+
+#do the same for not known
+ar_data$fludro_dose_but_registry_taking_not_known <-
+  ifelse(ar_data$Fludrocortisone...Current.Medication_carried_to_use=="Not known" &
+           ar_data$fludrocortisone_dose>0,
+         1,
+         0)
+freq(ar_data$fludro_dose_but_registry_taking_not_known )
+print("Therefore no discrepancy with those classed as 'Not Known'")
+```
+
+```{r, assess number of entries with Fludrocortisone...Current.Medication_carried_to_use and Fludrocortisone.frequency...Current.Medication is NA}
+ar_data$fludro_registry_taking_but_frequency_not_known <-
+  ifelse(ar_data$Fludrocortisone...Current.Medication_carried_to_use=="Yes" &
+           is.na(ar_data$Fludrocortisone.frequency...Current.Medication) |
+           ar_data$Fludrocortisone...Current.Medication_carried_to_use=="Yes" &
+           is.na(ar_data$Fludrocortisone.frequency...Current.Medication) |
+           ar_data$Fludrocortisone...Current.Medication_carried_to_use=="Yes" &
+           is.na(ar_data$Fludrocortisone.frequency...Current.Medication),
+         1,
+         0)
+
+freq(ar_data$fludro_registry_taking_but_frequency_not_known)
+```
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_15")
+
+Sys.time()
+```

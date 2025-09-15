@@ -1,0 +1,311 @@
+
+```{r, load packages}
+rm(list = ls())
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_15",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+```
+
+```{r, create a frame that lets us check doses easily}
+manual_review_of_glucocorticoid_doses_after_carry <-
+  ar_data[,c(
+    "id",
+    "id_visit_date",
+    "Decimal.age.at.visit..calculated.by.formula..YEARFRAC.DOB.DOV..",
+    "total_daily_fludro_dose_with_zero_carried_to_use",
+    "converted_salt_mass_with_zero_carried_to_use",
+    "Glucocorticoids...Current.Medication_original",
+    "Glucocorticoids...Current.Medication",
+    "Glucocorticoids...Current.Medication_carried_to_use",
+    "Glucocorticoids.note...Current.Medication",
+    "total_daily_hydrocortisone_equivalent_at_visit_carried_to_use",
+    "absolute_daily_GC_dose_sum",
+    "daily_preparation_of_GC_to_use",
+    "total_daily_hydrocortisone_equivalent_at_visit",
+    "Daily.adherence.to.therapy...Current.Medication",
+    "Has.treatment.changed.since.last.visit...Current.Medication",
+    "Why.was.treatment.changed...Current.Medication",
+    "medicine_1",
+    "GC_dose_1",
+    "meds_unit_1")]
+
+write.csv(manual_review_of_glucocorticoid_doses_after_carry,
+          "manual_review_of_glucocorticoid_doses_after_carry.csv",
+          row.names=F)
+```
+
+
+```{r, carry out some simple checks of LOCF and NOCB on glucocorticoids}
+print("We need to assess here whether the 'are they taking columns' are consistent with their being a value in the dose of that drug columns")
+print("If are we taking is 'No', then dose should be zero")
+print("If are we taking is 'Yes', then dose should be >0 or NA")
+print("If are we taking is 'Not known', then dose should be NA")
+print("We start by checking glucocorticoids:")
+
+ar_data$GC_consistency <-
+  ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="No" &
+           ar_data$total_daily_hydrocortisone_equivalent_at_visit_carried_to_use>0 |
+         ar_data$Glucocorticoids...Current.Medication_carried_to_use=="No" & 
+           is.na(ar_data$total_daily_hydrocortisone_equivalent_at_visit_carried_to_use),
+         1,
+         0)
+freq(ar_data$GC_consistency)
+ar_data_GC_consistency <-
+  subset(ar_data, GC_consistency==1)
+ar_data_GC_consistency$id_visit_date
+print("************************")
+
+
+ar_data$GC_consistency <-
+  ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Yes" &
+           ar_data$total_daily_hydrocortisone_equivalent_at_visit_carried_to_use==0,
+         1,
+         0)
+freq(ar_data$GC_consistency)
+ar_data_GC_consistency <-
+  subset(ar_data, GC_consistency==1)
+ar_data_GC_consistency$id_visit_date
+print("************************")
+
+
+ar_data$GC_consistency <-
+  ifelse(ar_data$Glucocorticoids...Current.Medication_carried_to_use=="Not known" &
+           !is.na(ar_data$total_daily_hydrocortisone_equivalent_at_visit_carried_to_use),
+         1,
+         0)
+freq(ar_data$GC_consistency)
+ar_data_GC_consistency <-
+  subset(ar_data, GC_consistency==1)
+ar_data_GC_consistency$id_visit_date
+print("************************")
+
+print("If all of those return character(0) then there are no nonsensical combinations for glucocorticoids")
+```
+
+```{r, carry out some simple checks of LOCF and NOCB on fludrocortisone}
+print("We need to assess here whether the 'are they taking columns' are consistent with their being a value in the dose of that drug columns")
+print("If are we taking is 'No', then dose should be zero")
+print("If are we taking is 'Yes', then dose should be >0 or NA")
+print("If are we taking is 'Not known', then dose should be NA")
+print("We start by checking fludrocortisone:")
+
+ar_data$FC_consistency <-
+  ifelse(ar_data$Fludrocortisone...Current.Medication_carried_to_use=="No" &
+           ar_data$total_daily_fludro_dose_with_zero_carried_to_use>0 |
+         ar_data$Fludrocortisone...Current.Medication_carried_to_use=="No" & 
+           is.na(ar_data$total_daily_fludro_dose_with_zero_carried_to_use),
+         1,
+         0)
+freq(ar_data$FC_consistency)
+ar_data_FC_consistency <-
+  subset(ar_data, FC_consistency==1)
+ar_data_FC_consistency$id_visit_date
+print("************************")
+
+
+ar_data$FC_consistency <-
+  ifelse(ar_data$Fludrocortisone...Current.Medication_carried_to_use=="Yes" &
+           ar_data$total_daily_fludro_dose_with_zero_carried_to_use==0,
+         1,
+         0)
+freq(ar_data$FC_consistency)
+ar_data_FC_consistency <-
+  subset(ar_data, FC_consistency==1)
+ar_data_FC_consistency$id_visit_date
+print("************************")
+
+
+ar_data$FC_consistency <-
+  ifelse(ar_data$Fludrocortisone...Current.Medication_carried_to_use=="Not known" &
+           !is.na(ar_data$total_daily_fludro_dose_with_zero_carried_to_use),
+         1,
+         0)
+freq(ar_data$FC_consistency)
+ar_data_FC_consistency <-
+  subset(ar_data, FC_consistency==1)
+ar_data_FC_consistency$id_visit_date
+print("************************")
+
+print("If all of those return character(0) then there are no nonsensical combinations for fludrocortisone")
+```
+
+```{r, carry out some simple checks of LOCF and NOCB on salt}
+print("We need to assess here whether the 'are they taking columns' are consistent with their being a value in the dose of that drug columns")
+print("If are we taking is 'No', then dose should be zero")
+print("If are we taking is 'Yes', then dose should be >0 or NA")
+print("If are we taking is 'Not known', then dose should be NA")
+print("We start by checking salt:")
+
+ar_data$salt_consistency <-
+  ifelse(ar_data$Salt.replacement...Current.Medication_carried_to_use=="No" &
+           ar_data$converted_salt_mass_with_zero_carried_to_use>0 |
+         ar_data$Salt.replacement...Current.Medication_carried_to_use=="No" & 
+           is.na(ar_data$converted_salt_mass_with_zero_carried_to_use),
+         1,
+         0)
+freq(ar_data$salt_consistency)
+ar_data_salt_consistency <-
+  subset(ar_data, salt_consistency==1)
+ar_data_salt_consistency$id_visit_date
+print("************************")
+
+ar_data$salt_consistency <-
+  ifelse(ar_data$Salt.replacement...Current.Medication_carried_to_use=="Yes" &
+           ar_data$converted_salt_mass_with_zero_carried_to_use==0,
+         1,
+         0)
+freq(ar_data$salt_consistency)
+ar_data_salt_consistency <-
+  subset(ar_data, salt_consistency==1)
+ar_data_salt_consistency$id_visit_date
+print("************************")
+
+
+ar_data$salt_consistency <-
+  ifelse(ar_data$Salt.replacement...Current.Medication_carried_to_use=="Not known" &
+           !is.na(ar_data$converted_salt_mass_with_zero_carried_to_use),
+         1,
+         0)
+freq(ar_data$salt_consistency)
+ar_data_salt_consistency <-
+  subset(ar_data, salt_consistency==1)
+ar_data_salt_consistency$id_visit_date
+print("************************")
+print("If all of those return character(0) then there are no nonsensical combinations for salt")
+```
+
+
+
+```{r, create a function that plots carried plots}
+create_carry_plots_for_column <- 
+  function (name_of_column){
+
+number_already_plotted <- 0
+#make a ggplot
+for(id_to_plot in (unique(ar_data$id))){
+print("The following number of patients are remaining:")
+print(length(unique(ar_data$id)) - number_already_plotted)
+
+print(paste0("Rendering id: ", id_to_plot, " for the column ", name_of_column))
+
+data_to_plot <-
+  subset(ar_data, 
+         id==id_to_plot)
+
+centre_name_for_plot <- data_to_plot$centreName[1]  
+
+column_data_to_plot <-
+  data_to_plot[,name_of_column]
+
+carried_data_to_plot <-
+  data_to_plot[,paste0(name_of_column, "_carried_to_use")]
+
+number_of_not_known_in_carried_data_to_plot <-
+  sum(data_to_plot[,paste0(name_of_column, "_carried_to_use")]=="Not known", na.rm=T)
+
+print("Number of Not known in that column for that patient is:")
+print(number_of_not_known_in_carried_data_to_plot)
+
+#render a plot with the individual patient data
+carry_plot <- 
+  ggplot(data=data_to_plot,
+       aes_string(x="age_to_use", y=name_of_column)) +
+#plot our imputed values in red:
+  geom_point(aes_string(x="age_to_use", 
+                        y=paste0(name_of_column, 
+                                 "_carried_to_use")),
+             alpha=1,
+             colour="red") +
+  geom_line(aes_string(x="age_to_use", 
+                       y=paste0(name_of_column, 
+                                "_carried_to_use")), 
+            alpha=1,
+             colour="red") +
+#plot our original values in black:  
+  geom_point(aes(),
+             alpha=1,
+             colour="black") +
+  geom_line(aes(), alpha=1,
+             colour="black") +
+#add a green vertical line for visits where we have a visit but it's too far away for us to impute
+  geom_vline(aes(xintercept=age_to_use), alpha=0.5,
+             colour="darkgreen") +
+#  geom_text(aes(label=assessment_id, y=3), 
+#            angle=90, 
+#            vjust=0,
+#            size=0.5) +
+#  geom_text(aes(label=fludrocortisone_dose, y=fludrocortisone_frequency_number), 
+#            angle=0, 
+#            vjust=1,
+#            hjust="right",
+#            size=4,
+#            fontface="bold") +
+#  coord_cartesian(ylim=c(0,4)) +
+  labs(title=paste0("column = ", name_of_column, " : Patient ID = ", id_to_plot, ", Centre = ", centre_name_for_plot),
+       subtitle=paste0(
+         "Green lines are visits. Black points show data entered in this column. Number 'Not known' in this id is ",
+         number_of_not_known_in_carried_data_to_plot, 
+         ". Red points are data carried.")) +
+  themepowerpointtitle
+dir.create("carry_plots")
+dir.create(paste0("carry_plots/", name_of_column))
+
+ggsave(filename=paste0("Patient_ID_", id_to_plot,".png"), 
+       path=paste0("carry_plots/", name_of_column), 
+       plot = carry_plot, 
+       device="png",  
+       width=6, 
+       height=3, 
+       limitsize=F)
+
+number_already_plotted <- number_already_plotted + 1
+}
+}
+```
+
+```{r, apply the function to create plots for the appropriate number containing columns that we have already performed LOCF and NOCB upon}
+#create plots for hydrocortisone
+create_carry_plots_for_column("total_daily_hydrocortisone_equivalent_at_visit")
+
+create_carry_plots_for_column("absolute_total_daily_hydrocortisone_at_visit")
+
+#create plots for fludrocortisone
+create_carry_plots_for_column("total_daily_fludro_dose_with_zero")
+
+#create plots for salt
+create_carry_plots_for_column("converted_salt_mass_with_zero")
+Sys.time()
+```
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_16")
+
+Sys.time()
+```
+

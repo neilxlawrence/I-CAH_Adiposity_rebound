@@ -1,0 +1,1217 @@
+
+Load packages and reread files using the prebuilt load files function
+
+```{r, load packages}
+rm(list = ls())
+
+#take the working directory otherwise, which should work every time?
+if(!exists("location_of_main_folder")){
+  location_of_main_folder <- 
+    getwd()
+}
+#paste the name of our functions folder into the path name
+location_of_functions_folder <-
+  paste0(location_of_main_folder, "/ar_functions_folder/")
+
+#load the function that loads all the libraries and sources
+source(paste0(location_of_functions_folder, "load_ar_libraries_and_sources_function.R"))
+
+#paste together the location of the data files - we don't load in the first file, but we need this location for the end
+location_of_data_files <-
+  paste0(location_of_main_folder, "/ar_data_files_to_load/")
+
+#run the function, pointing it towards the functions folder
+load_ar_libraries_and_sources_function(
+  location_of_functions_folder=location_of_functions_folder,
+  location_of_data_files=location_of_data_files
+)
+
+load_ar_files_function(previous_file_name = "file_19",
+  parent_directory = location_of_data_files,
+  list_of_data_frames_to_load=list("ar_data"))
+```
+
+```{r, create bone age}
+cat("We know that bone age entries perpetuate in the registry - someone enters a bone age, and it is still there at the next visit. We therefore need code that accepts only the entry of bone age closest to the bone age date, unless it changes")
+```
+
+```{r, create original columns in case we want to do manual corrections later based on centre correspondence}
+ar_data$Bone.age.result..years....Bone.health.and.maturation_original <-
+  ar_data$Bone.age.result..years....Bone.health.and.maturation
+ar_data$Date.of.test...Bone.health.and.maturation_original <-
+  ar_data$Date.of.test...Bone.health.and.maturation
+ar_data$Bone.age.method...Bone.health.and.maturation_original <-
+  ar_data$Bone.age.method...Bone.health.and.maturation
+```
+
+```{r, create a posix of bone age column and calculate how far away the reading was from the visit date}
+ar_data$bone_age_date_posix <-
+  as.POSIXct(as.Date(ar_data$Date.of.test...Bone.health.and.maturation, format = "%d/%m/%Y"))
+
+ar_data$bone_age_days_from_visit <- 
+  as.numeric(difftime(ar_data$visit_date, ar_data$bone_age_date_posix, units = "days"))
+
+#turn the bone_age_days_from_visit absolute
+ar_data$bone_age_days_from_visit <- 
+  ifelse(ar_data$bone_age_days_from_visit < 0,
+         ar_data$bone_age_days_from_visit * -1,
+         ar_data$bone_age_days_from_visit
+)
+
+```
+
+```{r, flag the bone age parameters if they are not the closest visit to them}
+ar_data_tidied_bone_age <- ar_data %>%
+  group_by(id, Date.of.test...Bone.health.and.maturation) %>%
+  mutate(
+    min_val = suppressWarnings(min(bone_age_days_from_visit, na.rm = TRUE)), #suppresswarnings hides warnings that would occur if the entire group is NA
+    bone_age_closest_to_visit = ifelse(
+      is.finite(min_val),
+      bone_age_days_from_visit == min_val,
+      NA
+    )
+  ) %>%
+  dplyr::select(-min_val) %>% # remove the min value column as it's no longer neeeded
+  ungroup()
+
+
+```
+
+
+```{r, create bone_age only applied to the visit it is closest to}
+#we now only use the bone_age if it is marked from a reading that is closest to visit
+ar_data_tidied_bone_age$bone_age <-
+  ifelse(ar_data_tidied_bone_age$bone_age_closest_to_visit==T,
+         ar_data_tidied_bone_age$Bone.age.result..years....Bone.health.and.maturation,
+         NA)
+#add a column of total_bone_age_readings_for_id
+
+ar_data_tidied_bone_age <- ar_data_tidied_bone_age %>%
+  group_by(id) %>%
+  mutate(
+    total_bone_age_readings_for_id = sum(!is.na(bone_age))
+  ) %>%
+  ungroup()
+
+patients_with_bone_age <- subset(ar_data_tidied_bone_age[,c(
+  "id",
+  "id_visit_date",
+  "visit_date",
+  "age_to_use",
+  "interpolated_height",
+  "bone_age",
+  "total_bone_age_readings_for_id",
+  "Bone.age.result..years....Bone.health.and.maturation",
+  "Date.of.test...Bone.health.and.maturation",
+  "Bone.age.method...Bone.health.and.maturation"
+)], !is.na(Bone.age.result..years....Bone.health.and.maturation))
+
+patient_991 <- 
+  subset(patients_with_bone_age, id=="991")
+
+ggplot(ar_data_tidied_bone_age, aes(x=age_to_use, y=bone_age)) + geom_point()
+```
+
+```{r, rationalise the file name}
+ar_data <- ar_data_tidied_bone_age
+```
+
+
+*********************
+Setting limits for extrapolation and scaled residual threshold for assessing outliers
+*********************
+
+```{r, Setting limits for extrapolation and scaled residual threshold for assessing outliers}
+cat(" Whilst we will definitely want to interpolate between points, it becomes more dangerous to extrapolate beyond them. Here we set the limits for both weight and height that we will accept extrapolation. If these are set to zero, then we don't extrapolate at all.")
+
+number_of_years_to_extrapolate_before_for_bone_age <- 0
+
+number_of_years_to_extrapolate_after_for_bone_age <- 0
+
+cat("We set residual threshold for the spline models here to detect outliers")
+
+spline_pearson_residual_threshold_for_bone_age <- 5
+
+spline_degrees_of_freedom_less_than_points <- 3
+
+cat(" The linear interpolation then just fits points between points, it doesn't assess for outliers. Any outlier detection for individual points or overall patients (i.e. those who either have individual outlying points, or who have multiple points but they are all outlying (for instance if their date of birth hadn't been entered correctly and their growth curve was shifted in a direction, would have to have outlier detection within the whole frame)")
+```
+
+*******************************************************************************************************************
+interpolation of bone_age within patients using a hierarchical approach with GAM, spline, then straight line interpolations
+*******************************************************************************************************************
+
+```{r, using smooth.spline basic function within patients to create interpolations for weight using weight for patients with less than 11 observations but more than 3 observations}
+#you can loop around different options, but remember, the last option that is run will be the one that defines the interpolations and the outlier corrects, so ensure you have run the file with the last decided parameters, which should be 5 less than points for degrees of freedom and 0.5 for pearson residual threshold:
+#for (spline_degrees_of_freedom_less_than_points in c(1, 2, 3, 5)){
+#for (spline_pearson_residual_threshold_for_bone_age in c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9, 0.5)){
+#for (spline_pearson_residual_threshold_for_bone_age in c(0.1,0.2,0.5,1.0,2, 0.5)){
+
+#create a frame to join to
+all_spline_bone_age_interpolations <- 
+  data.frame(NULL)
+
+all_ids_with_enough_id_data_for_spline <- 
+  data.frame(NULL)
+
+id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame <-
+  data.frame(NULL)
+
+
+#we loop around all of the patients with bone age
+for (id_to_impute in unique(patients_with_bone_age$id)){
+
+
+  
+#clear the frame at the beginning of the loop that I use to add to the frame outside of the loop
+id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame_to_add <- data.frame(NULL)
+
+id_data <- 
+  subset(ar_data, 
+         id==id_to_impute)  
+
+cat(" \n")
+cat(" id is: \n")
+cat(id_to_impute)
+cat(" \n")
+cat(" ; total number of rows is: \n")
+cat(nrow(id_data))
+cat(" \n")
+
+#take out the data from the id
+id_data <- 
+  subset(id_data, 
+         !is.na(bone_age) &
+           !is.na(age_to_use))
+
+cat(" ; number of rows with bone age is: \n")
+cat(nrow(id_data))
+
+
+#pull out the earliest age where we have data for this patient
+earliest_age_with_data <- 
+  min(id_data$age_to_use)
+
+oldest_age_with_data <- 
+  max(id_data$age_to_use)
+
+#use our thresholds for extrapolation to define ages above and beyond which we will fit the spline
+earliest_age_to_apply_the_model_to_this_patient <- 
+  earliest_age_with_data - 
+  number_of_years_to_extrapolate_before_for_bone_age
+
+oldest_age_to_apply_the_model_to_this_patient <- 
+  oldest_age_with_data + 
+  number_of_years_to_extrapolate_after_for_bone_age
+
+#come out of the loop if we don't have 4 or more observations as we can't fit a spline
+if (
+  sum(!is.na(id_data$bone_age)) < 4 | 
+  sum(!is.na(id_data$age_to_use)) < 4
+) {
+  cat("Aborted patient before fitting a spline\n")
+  next
+}
+
+
+#pull out the columns we use for the model
+id_data <-
+  id_data[,c(
+    "id",
+    "id_visit_date",
+    "bone_age",
+    "age_to_use")]
+
+#assign the degrees of freedom for spline fitting
+#take the number of points minus the defined spline_degrees_of_freedom_less_than_points
+degrees_of_freedom_to_fit_spline <-
+    nrow(id_data) - spline_degrees_of_freedom_less_than_points
+
+#correct this if there is 4 or 5 points to be 4, because this is the minimum we can use to fit a spline
+degrees_of_freedom_to_fit_spline <-
+  ifelse(degrees_of_freedom_to_fit_spline < 4,
+         4,
+         degrees_of_freedom_to_fit_spline)
+
+#fit a spline with 4 degrees of freedom
+spline_model_bone_age_with_age <- 
+  smooth.spline(
+    id_data$age_to_use,
+    id_data$bone_age,
+    df=degrees_of_freedom_to_fit_spline) 
+
+########################
+#Detect Outliers
+########################
+
+#create a copy of the data for this patient
+id_data_with_spline_model <-
+  id_data
+
+# Predict values
+id_data_with_spline_model$spline_model_bone_age_with_age <- 
+  predict(spline_model_bone_age_with_age)$y
+
+# Calculate residuals
+residuals <- 
+  id_data_with_spline_model$bone_age - 
+  id_data_with_spline_model$spline_model_bone_age_with_age
+
+# Calculate response variable standard deviation
+response_sd <- 
+  sqrt(var(id_data_with_spline_model$bone_age))  # Degree of freedom is length of residuals - 2
+
+# Calculate studentised residuals
+id_data_with_spline_model$pearson_residuals <- 
+  residuals / response_sd
+
+#put a clause in here to turn any infinite residual into zero for perfect fits
+id_data_with_spline_model$pearson_residuals <- 
+  ifelse(id_data_with_spline_model$pearson_residuals=="Inf" | 
+           id_data_with_spline_model$pearson_residuals=="-Inf" | 
+           id_data_with_spline_model$pearson_residuals=="NaN",
+         0,
+         id_data_with_spline_model$pearson_residuals)
+
+#Calculate absolute studentised residuals 
+id_data_with_spline_model$absolute_pearson_residuals <-
+  ifelse(id_data_with_spline_model$pearson_residuals < 0,
+         -id_data_with_spline_model$pearson_residuals,
+         id_data_with_spline_model$pearson_residuals)
+
+#########################################################################################
+#marking 1st worst residual outlier, removing, and refitting the model
+#########################################################################################
+#if we have residuals over our threshold, then we mark the biggest residual as an outlier
+if (max(id_data_with_spline_model$absolute_pearson_residuals) > 
+    spline_pearson_residual_threshold_for_bone_age){
+  
+  #take out the row with the worst residual
+  worst_id_data_with_spline_model <-
+    id_data_with_spline_model %>% 
+    group_by(id) %>%
+    slice_max(absolute_pearson_residuals, 
+              with_ties = F, 
+              n=1)
+  
+  #pull out that id_visit_date flagged as an outlier, tell us what method and what iteration it came out at
+  
+  id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame_to_add <-
+      data.frame(id_visit_date = worst_id_data_with_spline_model$id_visit_date,
+                 bone_age_flagged_as_an_outlier_by_spline_age = 1,
+                 bone_age_outlier_flag_method = "model_bone_age_using_spline_with_age",
+                 bone_age_spline_iteration_outlier_was_flagged = 1)
+    
+  #bind that to the frame outside of the loop
+    id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame <-
+      rbind(id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame,
+            id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame_to_add)
+    
+  #create a second iteration frame to remodel
+    id_data_with_age_bone_age_to_model_second_iteration <-
+      subset(id_data, 
+             !(id_visit_date %in% id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame$id_visit_date))
+  
+  #then reinsert our clause to skip to the next iteration in the loop if we've dropped below the threshold to be able to fit a spline model 
+  #realise that this means we may flag some outliers through gam modelling, but will be left without a value for a predicted spline model  
+if (
+  sum(!is.na(id_data_with_age_bone_age_to_model_second_iteration$bone_age)) < 4 | 
+  sum(!is.na(id_data_with_age_bone_age_to_model_second_iteration$age_to_use)) < 4
+) {
+  cat("Aborted loop after removing one outlier\n")
+  next
+}
+
+  
+  #if we haven't skipped, then we can refit our model without using the data without the outlier point  
+    #take one off the degrees of freedom because we have removed one
+    degrees_of_freedom_to_fit_spline <-
+      degrees_of_freedom_to_fit_spline -1
+  spline_model_bone_age_with_age <- 
+    smooth.spline(id_data_with_age_bone_age_to_model_second_iteration$age_to_use,
+                  id_data_with_age_bone_age_to_model_second_iteration$bone_age,
+                  df=degrees_of_freedom_to_fit_spline) 
+    
+    # Predict values
+    id_data_with_age_bone_age_to_model_second_iteration$spline_model_bone_age_with_age <- 
+      predict(spline_model_bone_age_with_age)$y
+
+    # Calculate residuals
+    residuals <- 
+      id_data_with_age_bone_age_to_model_second_iteration$bone_age - 
+      id_data_with_age_bone_age_to_model_second_iteration$spline_model_bone_age_with_age
+
+    # Calculate response variable standard deviation
+     response_sd <- 
+       sqrt(var(id_data_with_age_bone_age_to_model_second_iteration$bone_age)) # Degree of freedom is length of residuals - 2
+
+    # Calculate studentised residuals
+    id_data_with_age_bone_age_to_model_second_iteration$pearson_residuals <- 
+      residuals / response_sd
+    
+#put a hack in here to turn any infinite residual into zero for perfect fits
+id_data_with_age_bone_age_to_model_second_iteration$pearson_residuals <- 
+  ifelse(id_data_with_age_bone_age_to_model_second_iteration$pearson_residuals=="Inf" | 
+           id_data_with_age_bone_age_to_model_second_iteration$pearson_residuals=="-Inf" | 
+           id_data_with_age_bone_age_to_model_second_iteration$pearson_residuals=="NaN",
+         0,
+         id_data_with_age_bone_age_to_model_second_iteration$pearson_residuals)
+
+    #Calculate absolute studentised residuals 
+    id_data_with_age_bone_age_to_model_second_iteration$absolute_pearson_residuals <-
+      ifelse(id_data_with_age_bone_age_to_model_second_iteration$pearson_residuals <0,
+             -id_data_with_age_bone_age_to_model_second_iteration$pearson_residuals,
+             id_data_with_age_bone_age_to_model_second_iteration$pearson_residuals)
+    
+#########################################################################################
+#marking 2nd worst residual outlier, removing, and refitting the model
+#########################################################################################
+#if we have residuals over our threshold, then we mark the biggest residual as an outlier
+if (max(id_data_with_age_bone_age_to_model_second_iteration$absolute_pearson_residuals) > 
+    spline_pearson_residual_threshold_for_bone_age){
+  
+  #take out the row with the worst residual
+  worst_id_data_with_age_bone_age_to_model_second_iteration <-
+    id_data_with_age_bone_age_to_model_second_iteration %>% 
+    group_by(id) %>%
+    slice_max(absolute_pearson_residuals, 
+              with_ties = F, 
+              n=1)
+  
+  #pull out that id_visit_date flagged as an outlier, tell us what method and what iteration it came out at
+
+    id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame_to_add <-
+      data.frame(id_visit_date = worst_id_data_with_age_bone_age_to_model_second_iteration$id_visit_date,
+                 bone_age_flagged_as_an_outlier_by_spline_age = 1,
+                 bone_age_outlier_flag_method = "model_bone_age_using_spline_with_age",
+                 bone_age_spline_iteration_outlier_was_flagged = 2)
+    
+  #bind that to the frame outside of the loop
+    id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame <-
+      rbind(id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame,
+            id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame_to_add)
+    
+  #create a third iteration frame to remodel
+    id_data_with_age_bone_age_to_model_third_iteration <-
+      subset(id_data, 
+             !(id_visit_date %in% 
+                 id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame$id_visit_date))
+  
+  #then reinsert our clause to skip to the next iteration in the loop if we've dropped below the threshold to be able to fit a spline model 
+  #realise that this means we may flag some outliers through gam modelling, but will be left without a value for a predicted spline model  
+if (
+  sum(!is.na(id_data_with_age_bone_age_to_model_third_iteration$bone_age)) < 4 | 
+  sum(!is.na(id_data_with_age_bone_age_to_model_third_iteration$age_to_use)) < 4
+) {
+  cat("Aborted loop after removing two outliers\n")
+  next
+}
+
+
+  
+  #if we haven't skipped, then we can refit our model without using the data without the outlier point  
+    #take one off the degrees of freedom because we have removed one
+    degrees_of_freedom_to_fit_spline <-
+      degrees_of_freedom_to_fit_spline -1    
+  
+    spline_model_bone_age_with_age <- 
+      smooth.spline(
+        id_data_with_age_bone_age_to_model_third_iteration$age_to_use,
+        id_data_with_age_bone_age_to_model_third_iteration$bone_age,
+        df=degrees_of_freedom_to_fit_spline) 
+    
+    # Predict values
+    id_data_with_age_bone_age_to_model_third_iteration$spline_model_bone_age_with_age <- 
+      predict(spline_model_bone_age_with_age)$y
+
+    # Calculate residuals
+    residuals <- 
+      id_data_with_age_bone_age_to_model_third_iteration$bone_age - 
+      id_data_with_age_bone_age_to_model_third_iteration$spline_model_bone_age_with_age
+
+    # Calculate response variable standard deviation
+    response_sd <- 
+      sqrt(var(id_data_with_age_bone_age_to_model_third_iteration$bone_age)) # Degree of freedom is length of residuals - 2
+
+    # Calculate studentised residuals
+    id_data_with_age_bone_age_to_model_third_iteration$pearson_residuals <- 
+      residuals / response_sd
+    
+#put a hack in here to turn any infinite residual into zero for perfect fits
+    id_data_with_age_bone_age_to_model_third_iteration$pearson_residuals <- 
+      ifelse(
+        id_data_with_age_bone_age_to_model_third_iteration$pearson_residuals=="Inf" | 
+        id_data_with_age_bone_age_to_model_third_iteration$pearson_residuals=="-Inf" | 
+        id_data_with_age_bone_age_to_model_third_iteration$pearson_residuals=="NaN",
+        0,
+        id_data_with_age_bone_age_to_model_third_iteration$pearson_residuals)
+
+
+    #Calculate absolute studentised residuals 
+    id_data_with_age_bone_age_to_model_third_iteration$absolute_pearson_residuals <-
+      ifelse(
+        id_data_with_age_bone_age_to_model_third_iteration$pearson_residuals <0,
+        -id_data_with_age_bone_age_to_model_third_iteration$pearson_residuals,
+        id_data_with_age_bone_age_to_model_third_iteration$pearson_residuals)
+    
+#########################################################################################
+#marking 3rd worst residual outlier, removing, and refitting the model
+#########################################################################################
+#if we have residuals over our threshold, then we mark the biggest residual as an outlier
+if (max(id_data_with_age_bone_age_to_model_third_iteration$absolute_pearson_residuals) > 
+    spline_pearson_residual_threshold_for_bone_age){
+  
+  #take out the row with the worst residual
+  worst_id_data_with_age_bone_age_to_model_third_iteration <-
+    id_data_with_age_bone_age_to_model_third_iteration %>% 
+    group_by(id) %>%
+    slice_max(absolute_pearson_residuals, 
+              with_ties = F, 
+              n=1)
+  
+  #pull out that id_visit_date flagged as an outlier, tell us what method and what iteration it came out at
+
+    id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame_to_add <-
+      data.frame(id_visit_date = worst_id_data_with_age_bone_age_to_model_third_iteration$id_visit_date,
+                 bone_age_flagged_as_an_outlier_by_spline_age = 1,
+                 bone_age_outlier_flag_method = "model_bone_age_using_spline_with_age",
+                 bone_age_spline_iteration_outlier_was_flagged = 3)
+    
+  #bind that to the frame outside of the loop
+    id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame <-
+      rbind(id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame,
+            id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame_to_add)
+    
+  #create a fourth iteration frame to remodel
+    id_data_with_age_bone_age_to_model_fourth_iteration <-
+      subset(id_data, 
+             !(id_visit_date %in% 
+                 id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame$id_visit_date))
+  
+  #then reinsert our clause to skip to the next iteration in the loop if we've dropped below the threshold to be able to fit a spline model 
+  #realise that this means we may flag some outliers through gam modelling, but will be left without a value for a predicted spline model  
+if (
+  sum(!is.na(id_data_with_age_bone_age_to_model_fourth_iteration$bone_age)) < 4 | 
+  sum(!is.na(id_data_with_age_bone_age_to_model_fourth_iteration$age_to_use)) < 4
+) {
+  cat("Aborted loop after removing three outliers\n")
+  next
+}
+
+  
+  #if we haven't skipped, then we can refit our model without using the data without the outlier point  
+        #take one off the degrees of freedom because we have removed one
+    degrees_of_freedom_to_fit_spline <-
+      degrees_of_freedom_to_fit_spline -1    
+    
+    spline_model_bone_age_with_age <- 
+      smooth.spline(
+        id_data_with_age_bone_age_to_model_fourth_iteration$age_to_use,
+        id_data_with_age_bone_age_to_model_fourth_iteration$bone_age,
+        df=degrees_of_freedom_to_fit_spline) 
+    
+    # Predict values
+    id_data_with_age_bone_age_to_model_fourth_iteration$spline_model_bone_age_with_age <- 
+      predict(spline_model_bone_age_with_age)$y
+
+    # Calculate residuals
+    residuals <- 
+      id_data_with_age_bone_age_to_model_fourth_iteration$bone_age - 
+      id_data_with_age_bone_age_to_model_fourth_iteration$spline_model_bone_age_with_age
+
+    # Calculate response variable standard deviation
+    response_sd <- 
+      sqrt(var(id_data_with_age_bone_age_to_model_fourth_iteration$bone_age))   # Degree of freedom is length of residuals - 2
+
+    # Calculate studentised residuals
+    id_data_with_age_bone_age_to_model_fourth_iteration$pearson_residuals <- 
+      residuals / response_sd
+    
+    #put a hack in here to turn any infinite residual into zero for perfect fits
+    id_data_with_age_bone_age_to_model_fourth_iteration$pearson_residuals <- 
+      ifelse(
+        id_data_with_age_bone_age_to_model_fourth_iteration$pearson_residuals=="Inf" | 
+        id_data_with_age_bone_age_to_model_fourth_iteration$pearson_residuals=="-Inf" | 
+        id_data_with_age_bone_age_to_model_fourth_iteration$pearson_residuals=="NaN",
+        0,
+        id_data_with_age_bone_age_to_model_third_iteration$pearson_residuals)
+
+
+    #Calculate absolute studentised residuals 
+    id_data_with_age_bone_age_to_model_fourth_iteration$absolute_pearson_residuals <-
+      ifelse(id_data_with_age_bone_age_to_model_fourth_iteration$pearson_residuals <0,
+             -id_data_with_age_bone_age_to_model_fourth_iteration$pearson_residuals,
+             id_data_with_age_bone_age_to_model_fourth_iteration$pearson_residuals)
+    
+#########################################################################################
+#marking 4th worst residual outlier, removing, and refitting the model
+#########################################################################################
+#if we have residuals over our threshold, then we mark the biggest residual as an outlier
+
+if (max(id_data_with_age_bone_age_to_model_fourth_iteration$absolute_pearson_residuals) > 
+    spline_pearson_residual_threshold_for_bone_age){
+  
+  #take out the row with the worst residual
+  worst_id_data_with_age_bone_age_to_model_fourth_iteration <-
+    id_data_with_age_bone_age_to_model_fourth_iteration %>% 
+    group_by(id) %>%
+    slice_max(absolute_pearson_residuals, 
+              with_ties = F, 
+              n=1)
+  
+  #pull out that id_visit_date flagged as an outlier, tell us what method and what iteration it came out at
+
+    id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame_to_add <-
+      data.frame(id_visit_date = worst_id_data_with_age_bone_age_to_model_fourth_iteration$id_visit_date,
+                 bone_age_flagged_as_an_outlier_by_spline_age = 1,
+                 bone_age_outlier_flag_method = "model_bone_age_using_spline_with_age",
+                 bone_age_spline_iteration_outlier_was_flagged = 4)
+    
+  #bind that to the frame outside of the loop
+    id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame <-
+      rbind(id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame,
+            id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame_to_add)
+    
+  #create a fifth iteration frame to remodel
+    id_data_with_age_weight_to_model_fifth_iteration <-
+      subset(id_data, 
+             !(id_visit_date %in% 
+                 id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame$id_visit_date))
+  
+  #then reinsert our clause to skip to the next iteration in the loop if we've dropped below the threshold to be able to fit a spline model 
+  #realise that this means we may flag some outliers through gam modelling, but will be left without a value for a predicted spline model  
+    
+if (
+  sum(!is.na(id_data_with_age_weight_to_model_fifth_iteration$bone_age)) < 4 | 
+  sum(!is.na(id_data_with_age_weight_to_model_fifth_iteration$age_to_use)) < 4
+) {
+  cat("Aborted loop after removing four outliers\n")
+  next
+}
+
+
+  
+  #if we haven't skipped, then we can refit our model without using the data without the outlier point  
+            #take one off the degrees of freedom because we have removed one
+    degrees_of_freedom_to_fit_spline <-
+      degrees_of_freedom_to_fit_spline -1    
+  spline_model_bone_age_with_age <- 
+    smooth.spline(id_data_with_age_weight_to_model_fifth_iteration$age_to_use,
+                  id_data_with_age_weight_to_model_fifth_iteration$bone_age,
+                  df=degrees_of_freedom_to_fit_spline) 
+    
+#and that will be our final model so we close off our if clauses
+}}}}
+    
+#take out all of the data points for this patient again
+new_data_with_just_age <-
+  subset(
+    data.frame(
+      id = ar_data$id,
+      id_visit_date = ar_data$id_visit_date,
+      age_to_use = ar_data$age_to_use
+    ), id==id_to_impute)
+
+#subset just the data that is bounded by our limits of extrapolation. This will also remove any that has age as an NA
+new_data_with_just_age <- 
+  subset(
+    new_data_with_just_age,
+    age_to_use >= earliest_age_to_apply_the_model_to_this_patient &
+      age_to_use <= oldest_age_to_apply_the_model_to_this_patient
+  )
+
+#apply the spline model to this data from the patient
+new_data_with_just_age$spline_model_bone_age_with_age <- 
+  predict(spline_model_bone_age_with_age, 
+          new_data_with_just_age$age_to_use)$y
+
+#join in the spline model predictions
+spline_interpolated_data <-
+  left_join(
+    ar_data, 
+    new_data_with_just_age, 
+    by = (c("id_visit_date", 
+            "age_to_use",
+            "id"
+            )))
+
+#create a flag if the bone_age is NA 
+spline_interpolated_data$spline_interpolated_bone_age_flag <-
+  ifelse(is.na(spline_interpolated_data$bone_age),
+         1,
+         0)
+
+#insert the interpolated data if it is NA, or the original data if it is not
+spline_interpolated_data$spline_interpolated_bone_age <-
+  ifelse(is.na(spline_interpolated_data$bone_age),
+         spline_interpolated_data$spline_model_bone_age_with_age,
+         spline_interpolated_data$bone_age)
+
+#restrict to just this patient
+spline_interpolated_data <- 
+  subset(spline_interpolated_data, 
+         id==id_to_impute)
+
+#take out just the necessary columns
+spline_interpolated_data <-
+  spline_interpolated_data[,c(
+    "id_visit_date",
+    "age_to_use",
+    "bone_age",
+    "spline_model_bone_age_with_age",
+    "spline_interpolated_bone_age"
+)]
+
+#join in our information about outliers
+#put a hack in here if we haven't found any outliers, to facilitate a join
+if(nrow(id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame_to_add)==0){
+  id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame <- 
+    data.frame(id_visit_date = "null_frame",
+               bone_age_flagged_as_an_outlier_by_spline_age = 0,
+               bone_age_outlier_flag_method = "no_outliers",
+               bone_age_spline_iteration_outlier_was_flagged = 0)
+}
+
+
+id_data_with_spline_model_with_outlier_info <-
+  left_join(
+    spline_interpolated_data,
+    id_visit_dates_with_bone_age_flagged_as_outliers_from_spline_with_age_frame,
+    by="id_visit_date"
+  )
+
+#after joining, we now need to complete that column to ensure anyone who isn't flagged has a zero to prevent NA's ruining the ifelse going forward
+id_data_with_spline_model_with_outlier_info$bone_age_flagged_as_an_outlier_by_spline_age <-
+  ifelse(is.na(id_data_with_spline_model_with_outlier_info$bone_age_flagged_as_an_outlier_by_spline_age),
+        0,
+        id_data_with_spline_model_with_outlier_info$bone_age_flagged_as_an_outlier_by_spline_age)
+
+#if bone_age has been flagged as an outlier, then use the spline interpolation that uses age 
+id_data_with_spline_model_with_outlier_info$spline_interpolated_bone_age <-
+  ifelse((id_data_with_spline_model_with_outlier_info$bone_age_flagged_as_an_outlier_by_spline_age==1),
+         id_data_with_spline_model_with_outlier_info$spline_model_bone_age_with_age,
+         id_data_with_spline_model_with_outlier_info$spline_interpolated_bone_age)
+
+#create a flag for interpolated weight if we don't have a bone_age value and we have a spline model fit to use
+id_data_with_spline_model_with_outlier_info$spline_interpolated_bone_age_flag <-
+  ifelse(is.na(id_data_with_spline_model_with_outlier_info$bone_age) &
+           !is.na(id_data_with_spline_model_with_outlier_info$spline_model_bone_age_with_age),
+         1,
+         0)
+
+#if we are flagged as an outlier, then we also need to be flagged as an interpolated point
+id_data_with_spline_model_with_outlier_info$spline_interpolated_bone_age_flag <-
+  ifelse((id_data_with_spline_model_with_outlier_info$bone_age_flagged_as_an_outlier_by_spline_age==1) ,
+         1,
+         id_data_with_spline_model_with_outlier_info$spline_interpolated_bone_age_flag)
+
+#the next ifelse statement must be different if the column doesn't exist
+if (("bone_age_spline_iteration_outlier_was_flagged" %in% colnames(id_data_with_spline_model_with_outlier_info))){
+  id_data_with_spline_model_with_outlier_info$bone_age_spline_iteration_outlier_was_flagged <-
+  ifelse(is.na(id_data_with_spline_model_with_outlier_info$bone_age_spline_iteration_outlier_was_flagged),
+         0,
+         id_data_with_spline_model_with_outlier_info$bone_age_spline_iteration_outlier_was_flagged)
+} else {
+  id_data_with_spline_model_with_outlier_info$bone_age_spline_iteration_outlier_was_flagged <- 0  
+}
+  
+#correct our column bone_age_spline_iteration_outlier_was_flagged to zero if it isn't flagged
+id_data_with_spline_model_with_outlier_info$bone_age_spline_iteration_outlier_was_flagged <-
+  ifelse(is.na(id_data_with_spline_model_with_outlier_info$bone_age_spline_iteration_outlier_was_flagged),
+         0,
+         id_data_with_spline_model_with_outlier_info$bone_age_spline_iteration_outlier_was_flagged)
+         
+
+id_data_with_spline_model_to_bind <- 
+  id_data_with_spline_model_with_outlier_info[,c(
+    "id_visit_date",
+    "age_to_use",
+    "bone_age",
+    "spline_interpolated_bone_age",
+    "spline_interpolated_bone_age_flag",
+    "bone_age_flagged_as_an_outlier_by_spline_age",
+    "bone_age_spline_iteration_outlier_was_flagged")]
+
+all_spline_bone_age_interpolations <- 
+  rbind(all_spline_bone_age_interpolations,
+        id_data_with_spline_model_to_bind)
+
+
+#collect the id's which were used outside of the loop of all ids
+all_ids_with_enough_id_data_for_spline <-
+  rbind(all_ids_with_enough_id_data_for_spline,
+        data.frame(id=id_to_impute))
+
+#create a plot of this patient
+spline_imputed_plot <- 
+  
+  ggplot(data=id_data_with_spline_model_with_outlier_info, 
+         aes(x=age_to_use, 
+             y=spline_interpolated_bone_age)) + 
+  
+  geom_point(data=
+               subset(id_data_with_spline_model_with_outlier_info, 
+                      spline_interpolated_bone_age_flag==0),
+             aes(), 
+             alpha=0.5, 
+             colour="blue") +
+  
+  geom_point(data=
+               subset(id_data_with_spline_model_with_outlier_info, 
+                      spline_interpolated_bone_age_flag==1),
+             aes(), 
+             alpha=0.5, 
+             colour="orange") +
+  
+  geom_point(data=subset(id_data_with_spline_model_with_outlier_info, 
+                         bone_age_flagged_as_an_outlier_by_spline_age==1),
+             aes(y=bone_age), 
+             alpha=0.5, 
+             colour="red") +
+  
+  geom_line(aes(x=age_to_use, 
+             y=spline_model_bone_age_with_age)) + 
+  
+  labs(title="Blue is original data that is reasonable, 
+       orange is interpolated data point, 
+       red is original data that has been flagged as an outlier",
+       subtitle=paste0("id=", id_to_impute, 
+                       " ; n outliers flagged = ",
+                       sum(id_data_with_spline_model_with_outlier_info$bone_age_flagged_as_an_outlier_by_spline_age==1),
+                       "; n interpolated points = ",
+                       sum(id_data_with_spline_model_with_outlier_info$spline_interpolated_bone_age_flag==1),
+                       "; St. Residual threshold:",
+                       spline_pearson_residual_threshold_for_bone_age))+
+  
+  coord_cartesian(xlim=c(0,20), ylim=c(0,20)) +
+  
+  themepowerpointtitle
+
+spline_imputed_plot
+
+dir.create(paste0("spline_bone_age_interpolation_plots/"))
+dir.create(paste0("spline_bone_age_interpolation_plots/spline_df_points_less_", 
+                  spline_degrees_of_freedom_less_than_points))
+dir.create(paste0("spline_bone_age_interpolation_plots/spline_df_points_less_", 
+                  spline_degrees_of_freedom_less_than_points, 
+                  "/residual_threshold_", 
+                  spline_pearson_residual_threshold_for_bone_age))
+dir.create(paste0("spline_bone_age_interpolation_plots/spline_df_points_less_", 
+                  spline_degrees_of_freedom_less_than_points, 
+                  "/residual_threshold_", 
+                  spline_pearson_residual_threshold_for_bone_age, 
+                  "/all_individual_interpolations/"))
+
+ggsave(filename=paste0("id_", id_to_impute, ".png"), 
+       path=paste0("spline_bone_age_interpolation_plots/spline_df_points_less_", 
+                  spline_degrees_of_freedom_less_than_points, 
+                  "/residual_threshold_", 
+                  spline_pearson_residual_threshold_for_bone_age, 
+                  "/all_individual_interpolations/"),
+       plot = spline_imputed_plot, 
+       device="png",  
+       width=6, 
+       height=3, 
+        limitsize=F)
+#save it again in a separate folder
+if(sum(
+  id_data_with_spline_model_with_outlier_info$bone_age_flagged_as_an_outlier_by_spline_age==1)>0){
+  
+
+dir.create(paste0("spline_bone_age_interpolation_plots/spline_df_points_less_", 
+                  spline_degrees_of_freedom_less_than_points, 
+                  "/residual_threshold_", 
+                  spline_pearson_residual_threshold_for_bone_age, 
+                  "/individual_interpolations_with_outliers"))
+  
+ggsave(filename=paste0("id_", id_to_impute, ".png"), 
+       path=paste0("spline_bone_age_interpolation_plots/spline_df_points_less_", 
+                  spline_degrees_of_freedom_less_than_points, 
+                  "/residual_threshold_", 
+                  spline_pearson_residual_threshold_for_bone_age, 
+                  "/individual_interpolations_with_outliers"),
+       plot = spline_imputed_plot, 
+       device="png",  
+       width=6, 
+       height=3, 
+        limitsize=F)
+}
+#save it again in a separate folder
+if(sum(
+  id_data_with_spline_model_with_outlier_info$spline_interpolated_bone_age_flag==1) > 0 ){
+  
+dir.create(paste0("spline_bone_age_interpolation_plots/spline_df_points_less_", 
+                  spline_degrees_of_freedom_less_than_points, 
+                  "/residual_threshold_", 
+                  spline_pearson_residual_threshold_for_bone_age, 
+                  "/individual_interpolations_leading_to_interpolated_points"))
+  
+ggsave(filename = paste0("id_", id_to_impute, ".png"), 
+       path = paste0("spline_bone_age_interpolation_plots/spline_df_points_less_", 
+                  spline_degrees_of_freedom_less_than_points, 
+                  "/residual_threshold_", 
+                  spline_pearson_residual_threshold_for_bone_age, 
+                  "/individual_interpolations_leading_to_interpolated_points"),
+       plot = spline_imputed_plot, 
+       device = "png",  
+       width=6, 
+       height=3, 
+        
+       limitsize=F)
+}
+#close and loop to the next patient
+}
+#}}
+
+```
+
+```{r, using approxfun to interpolate between points that have less than 4 observations for bone_age}
+#create a frame to join to for linear interpolations
+all_linear_interpolated_bone_age_data <- 
+  data.frame(NULL)
+
+ids_with_insufficient_data_for_linear_interpolation_of_bone_age <-
+  data.frame(NULL)
+
+all_ids_without_enough_data_for_spline_bone_age_interpolation_frame <-
+  subset(
+    data.frame(
+      id=unique(subset(ar_data, !is.na(bone_age))$id)), 
+      !(id %in% all_ids_with_enough_id_data_for_spline$id))
+
+cat(" Number of patients to fit a straight line model to is: \n")
+cat(nrow(unique(all_ids_without_enough_data_for_spline_bone_age_interpolation_frame)))
+
+for (id_to_impute in unique(all_ids_without_enough_data_for_spline_bone_age_interpolation_frame$id)){
+
+#id_to_impute <- 7891 # 
+
+id_data <- 
+  subset(ar_data, id==id_to_impute)  
+
+cat(" id is:\n")
+print(id_to_impute)
+cat(" number of rows is:\n")
+print(nrow(id_data))
+
+#skip if we don't have 2 data points to model and give a message
+if (sum(!is.na(id_data$bone_age)) < 2) {
+  cat("Unable to interpolate — this patient has fewer than 2 known bone age values\n")
+  
+  # Collect the id before skipping
+  ids_with_insufficient_data_for_linear_interpolation_of_bone_age_to_add <- 
+    data.frame(id = unique(id_data$id))
+  
+  # Bind that outside of the loop
+  ids_with_insufficient_data_for_linear_interpolation_of_bone_age <- 
+    rbind(
+      ids_with_insufficient_data_for_linear_interpolation_of_bone_age,
+      ids_with_insufficient_data_for_linear_interpolation_of_bone_age_to_add
+    )
+  
+  next
+}
+
+cat(" ; number of rows with bone age is: \n")
+cat(nrow(id_data))
+id_data <-
+  id_data[,c(
+    "id",
+    "bone_age",
+    "age_to_use",
+    "id_visit_date")]
+
+#fit a linear interpolation model
+id_data$linear_interpolation <- 
+  stats::approx(
+    x=id_data$age_to_use,
+    y=id_data$bone_age,
+    xout=id_data$age_to_use,
+    method="linear",
+    rule=1:1)$y # rule=1 means we don't extrapolate either side. if you use rule=2, then the adjacent data point is used for extrapolation. can use rule = 2:1 to do a different rule at beginning and end of data
+
+#check to see if we have an interpolated point and flag it - this must include that we don't extrapolate
+
+id_data$linear_interpolated_bone_age_flag <-
+  ifelse(is.na(id_data$bone_age) &
+           !is.na(id_data$linear_interpolation),
+         1,
+         0)
+
+id_data$linear_interpolated_bone_age <-
+  ifelse(is.na(id_data$bone_age),
+         id_data$linear_interpolation,
+         id_data$bone_age)
+
+  
+linear_interpolated_data_to_bind <- 
+  id_data[,c(
+    "id_visit_date",
+    "age_to_use",
+    "bone_age",
+    "linear_interpolated_bone_age",
+    "linear_interpolated_bone_age_flag")]
+
+all_linear_interpolated_bone_age_data <- 
+  rbind(all_linear_interpolated_bone_age_data,
+        linear_interpolated_data_to_bind)
+
+#create a plot of the linear interpolations
+linear_interpolated_plot <- 
+  
+  ggplot(data=linear_interpolated_data_to_bind, 
+         aes(x=age_to_use, 
+             y=linear_interpolated_bone_age)) + 
+  
+  geom_point(data=subset(linear_interpolated_data_to_bind, 
+                         linear_interpolated_bone_age_flag==0),
+    aes(), alpha=0.5, colour="blue") +
+  
+  geom_point(data=subset(linear_interpolated_data_to_bind, 
+                         linear_interpolated_bone_age_flag==1),
+    aes(), alpha=0.5, colour="orange") +
+  
+  geom_line(aes(x=age_to_use, 
+             y=linear_interpolated_bone_age)) + 
+  
+  labs(title=paste0("id=", id_to_impute, 
+                    " Blue is original data, 
+                    orange is interpolated missing data point, 
+                    no outliers are flagged by linear interpolation"),
+       subtitle=paste0("Number of interpolated points = ",
+                       sum(linear_interpolated_data_to_bind$linear_interpolated_bone_age_flag==1))) +
+  
+  coord_cartesian(xlim=c(0,20), ylim=c(0,20)) +
+  
+  themepowerpointtitle
+
+linear_interpolated_plot
+
+dir.create("linear_bone_age_interpolation_plots")
+dir.create("linear_bone_age_interpolation_plots/individual_imputations")
+
+ggsave(filename=paste0("id_", id_to_impute, ".png"), 
+       path = paste0("linear_bone_age_interpolation_plots/individual_imputations"),
+       plot = linear_interpolated_plot, 
+       device="png",  
+       width=6, 
+       height=3, 
+        
+       limitsize=F)
+
+if(sum(
+  linear_interpolated_data_to_bind$linear_interpolated_bone_age_flag==1) > 0 ){
+dir.create("linear_bone_age_interpolation_plots/individual_interpolations_leading_to_interpolated_points")  
+  
+ggsave(filename = paste0("id_", id_to_impute, ".png"), 
+       path = "linear_bone_age_interpolation_plots/individual_interpolations_leading_to_interpolated_points",
+       plot = linear_interpolated_plot, 
+       device = "png",  
+       width=6, 
+       height=3, 
+        
+       limitsize=F)
+
+
+}
+}
+sink("linear_bone_age_interpolation_plots/please_note_that_linear_interpolation_does_not_detect_outliers")
+cat(" please_note_that_linear_interpolation_does_not_detect_outliers")
+cat(" You have to change the settings within approxfun to cause linear interpolation to extrapolate")
+sink()
+
+```
+
+```{r, join in all of my bone_age imputations}
+all_spline_bone_age_interpolations_to_join <-
+  all_spline_bone_age_interpolations
+
+all_linear_interpolated_bone_age_data_to_join <- 
+  all_linear_interpolated_bone_age_data
+
+#get rid of some unnecessary columns that will cause column duplication
+all_spline_bone_age_interpolations_to_join$age_to_use <- NULL
+
+all_spline_bone_age_interpolations_to_join$bone_age <- NULL
+
+all_linear_interpolated_bone_age_data_to_join$age_to_use <- NULL
+
+all_linear_interpolated_bone_age_data_to_join$bone_age <- NULL
+
+nrow(ar_data)
+
+ar_data_with_all_bone_age_imputations_a <-
+  left_join(
+    ar_data, 
+    all_linear_interpolated_bone_age_data_to_join,
+    by="id_visit_date"
+  )
+
+nrow(ar_data_with_all_bone_age_imputations_a)
+
+ar_data_with_all_bone_age_imputations_b <-
+  left_join(
+    ar_data_with_all_bone_age_imputations_a, 
+    all_spline_bone_age_interpolations_to_join,
+    by="id_visit_date"
+  )
+
+nrow(ar_data_with_all_bone_age_imputations_b)
+
+cat(" This number should be zero to prove we haven't duplicated rows during the join:")
+
+nrow(ar_data_with_all_bone_age_imputations_b) - nrow(ar_data)
+
+#then we need to correct values of NA for those that haven't had an interpolation for our flags
+#correct spline with just age
+ar_data_with_all_bone_age_imputations_b$spline_interpolated_bone_age_flag <-
+  ifelse(
+    is.na(ar_data_with_all_bone_age_imputations_b$spline_interpolated_bone_age_flag),
+    0,
+    ar_data_with_all_bone_age_imputations_b$spline_interpolated_bone_age_flag
+  )
+
+ar_data_with_all_bone_age_imputations_b$bone_age_flagged_as_an_outlier_by_spline_age <-
+  ifelse(
+    is.na(ar_data_with_all_bone_age_imputations_b$bone_age_flagged_as_an_outlier_by_spline_age),
+    0,
+    ar_data_with_all_bone_age_imputations_b$bone_age_flagged_as_an_outlier_by_spline_age
+  )
+
+ar_data_with_all_bone_age_imputations_b$bone_age_spline_iteration_outlier_was_flagged <-
+  ifelse(
+    is.na(ar_data_with_all_bone_age_imputations_b$bone_age_spline_iteration_outlier_was_flagged),
+    0,
+    ar_data_with_all_bone_age_imputations_b$bone_age_spline_iteration_outlier_was_flagged
+  )
+
+#correct linear interpolation flag, remember no outliers in this method
+ar_data_with_all_bone_age_imputations_b$linear_interpolated_bone_age_flag <-
+  ifelse(
+    is.na(ar_data_with_all_bone_age_imputations_b$linear_interpolated_bone_age_flag),
+    0,
+    ar_data_with_all_bone_age_imputations_b$linear_interpolated_bone_age_flag
+  )
+```
+
+
+```{r, rationalise the file name}
+ar_data_before_join <- ar_data
+ar_data <- 
+  ar_data_with_all_bone_age_imputations_b
+```
+
+
+```{r, use the hierarchy to insert weight imputations and give us a column that tells us how our weight was interpolated}
+#if we have a value for linear interpolation then we use it as bottom rung of the hierarchy
+ar_data$interpolated_bone_age <-
+  ifelse(!is.na(ar_data$linear_interpolated_bone_age),
+         ar_data$linear_interpolated_bone_age,
+         NA)
+#categorise the method we have used if we have used that
+ar_data$interpolated_bone_age_method <-
+  ifelse(!is.na(ar_data$linear_interpolated_bone_age),
+         "linear_interpolation",
+         NA)
+
+#we use a spline value in preference to this if we have it (note, we shouldnt have both if we've only run the algorithm through necessary patients) It may be in future, because you do have the option of running the spline and the linear interpolation through also, I've just not done that to prevent outliers being flagged by some methods and not by others and therefore creating ambiguity
+ar_data$interpolated_bone_age <-
+  ifelse(!is.na(ar_data$spline_interpolated_bone_age),
+         ar_data$spline_interpolated_bone_age,
+         ar_data$interpolated_bone_age)
+#categorise the method we have used if we have used that
+ar_data$interpolated_bone_age_method <-
+  ifelse(!is.na(ar_data$spline_interpolated_bone_age),
+         "spline_interpolation",
+         ar_data$interpolated_bone_age_method)
+
+
+#if we dont have an interpolated bone_age, but we do have a bone_age, then we just insert the bone_age. This will not have been flagged as an outlier otherwise there would be an interpolated value for it
+ar_data$interpolated_bone_age <-
+  ifelse(is.na(ar_data$interpolated_bone_age),
+         ar_data$bone_age,
+         ar_data$interpolated_bone_age)
+
+#if we have a value for the original and our interpolation is the same as the original, then we can say that the value we are using is original
+ar_data$interpolated_bone_age_method <-
+  ifelse(!is.na(ar_data$Bone.age.result..years....Bone.health.and.maturation_original) & 
+           ar_data$Bone.age.result..years....Bone.health.and.maturation_original==ar_data$interpolated_bone_age,
+         "original_measurement",
+         ar_data$interpolated_bone_age_method)
+
+#then we can say that any remaining NA values we are unable to interpolate
+ar_data$interpolated_bone_age_method <-
+  ifelse(is.na(ar_data$interpolated_bone_age_method),
+         "unable_to_interpolate",
+         ar_data$interpolated_bone_age_method)
+
+cat(" Check that the number we are unable to interpolate is the same as the number we don't have an interpolated weight value for. This number should be zero:")
+sum(is.na(ar_data$interpolated_bone_age)) - sum(ar_data$interpolated_bone_age_method=="unable_to_interpolate")
+cat(" Summary statistics for weight before outlier corrections:")
+descr(ar_data$Bone.age.result..years....Bone.health.and.maturation_original)
+cat(" Summary statistics for weight after outlier corrections:")
+descr(ar_data$interpolated_bone_age)
+cat(" Number of readings before outlier corrections")
+sum(!is.na(ar_data$Bone.age.result..years....Bone.health.and.maturation_original))
+cat(" Number of registered methods of interpolation (this number should be the same)")
+sum(!is.na(ar_data$interpolated_bone_age_method))
+cat(" This number should NOT be zero because we should have extra points interpolated, otherwise please review interpolation hierarchy")
+sum(!is.na(ar_data$Bone.age.result..years....Bone.health.and.maturation_original)) - sum(!is.na(ar_data$interpolated_bone_age_method))
+cat(" The interpolation method frequencies are as follows:")
+freq(ar_data$interpolated_bone_age_method)
+
+
+bone_age_interpolation_visual_check <-
+  ar_data[,c(
+    "id",
+    "bone_age",
+    "interpolated_bone_age",
+    "interpolated_bone_age_method"
+  )]
+
+cat(" You can look at weight_interpolation_visual_check to see what's happening. We could increase data further by extrapolating for patients with some readings. Some patients don't have any readings - they could be imputed completely, for instance with age, sex, height and centre. Wouldn't want to have them change weight, but could do multiple imputation of weight that doesn't change in each dataset. Could also detect outlying patients and readings from those without many readings in the data set as a whole")
+```
+
+```{r, we want an overall flag for whether a value has been interpolated because it is missing, or interpolated because it is an outlier}
+ar_data$interpolated_bone_age_flag_because_missing <-
+  ifelse(is.na(ar_data$Bone.age.result..years....Bone.health.and.maturation_original) &
+           !is.na(ar_data$interpolated_bone_age),
+         1,
+         0)
+#freq(ar_data$interpolated_bone_age_flag_because_missing)
+
+ar_data$interpolated_bone_age_flag_because_outlier <-
+  ifelse(!is.na(ar_data$Bone.age.result..years....Bone.health.and.maturation_original) &
+           ar_data$Bone.age.result..years....Bone.health.and.maturation_original!=ar_data$interpolated_bone_age,
+         1,
+         0)
+#freq(ar_data$interpolated_bone_age_flag_because_outlier)
+
+cat(" we have interpolated the following number of weights because they were missing:")
+sum(ar_data$interpolated_bone_age_flag_because_missing)
+cat(" we have interpolated the following number of weights because they were flagged as outliers and replaced with interpolation:")
+sum(ar_data$interpolated_bone_age_flag_because_outlier)
+cat(" Remember, you can adjust the residual thresholds to flag things as outliers at the top of this file if necessary")
+```
+```{r, calculate interpolated_bone_age_advancement and original_bone_age_advancement}
+ar_data$interpolated_bone_age_advancement <-
+  ar_data$interpolated_bone_age - ar_data$age_to_use
+print("Number of bone age with interpolations")
+sum(!is.na(ar_data$interpolated_bone_age_advancement))
+
+ar_data$original_bone_age_advancement <-
+  ar_data$bone_age - ar_data$age_to_use
+print("Original number of bone age readings after correcting for the inappropriate perpetuation of data points and duplications")
+sum(!is.na(ar_data$original_bone_age_advancement))
+```
+
+
+
+```{r, end of file so save all the listed dataframes into the parent directory}
+save_ar_files_function(
+  parent_directory=location_of_data_files,
+  parent_file="file_20")
+Sys.time()
+```
+
+

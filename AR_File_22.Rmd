@@ -1,0 +1,24 @@
+point this file in the direction of who_growth_data_for_normative_curves
+collate all files together
+have them there to plot underlying our data if you wanted to compare to WHO curves
+
+```{r}
+library(ggplot2)
+# Load WHO growth reference data
+who_girls_bmi_5_to_19 <- read.csv("C://Users/User/Downloads/bmi-girls-perc-who2007-exp.csv")
+
+
+# Plot WHO percentiles
+ggplot(who_girls, aes(x = Month)) +
+  geom_line(aes(y = P3), linetype = "dashed", color = "black") +
+  geom_line(aes(y = P15), linetype = "dashed", color = "orange") +
+  geom_line(aes(y = P50), linetype = "dashed", color = "black", size = 1) +  # Median
+  geom_line(aes(y = P85), linetype = "dashed", color = "orange") +
+  geom_line(aes(y = P97), linetype = "dashed", color = "black") +
+  labs(title = "WHO Height-for-Age Growth Chart (Girls, 5–19 years)",
+       x = "Age (Months)", y = "Height (cm)") +
+  theme_minimal()
+
+
+```
+
